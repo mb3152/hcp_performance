@@ -19,12 +19,8 @@ import nibabel as nib
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from itertools import combinations
 from igraph import Graph, ADJ_UNDIRECTED
-import warnings
-import logging
 from scipy.stats import ttest_ind
 import glob
-# logging.captureWarnings(True)
-# warnings.catch_warnings(record=True)
 import math
 from collections import Counter
 import matplotlib.pylab as plt
@@ -33,12 +29,13 @@ import seaborn as sns
 from scipy.stats.mstats import zscore as z_score
 from igraph import VertexClustering
 import powerlaw
+
 #build graphs for timepoints when component is engaged.
 #build graphs for when no variance versus high variance, look at modularity and PC and WMD. Perhaps calculate 
 # modularity without PC nodes / See if most of the between module connections come from PC nodes.
 
 data_dir = '/home/despoB/mb3152/data/nki_data/preprocessed/pipeline_comp_cor_and_standard'
-subject_dir = '%s/SUBJECT_session_1/functional_mni/_scan_RfMRI_mx_645_rest/_csf_threshold_0.96/_gm_threshold_0.7/_wm_threshold_0.96/_compcor_ncomponents_5_selector_pc10.linear1.wm0.global0.motion1.quadratic1.gm0.compcor1.csf0/_bandpass_freqs_0.009.0.08/**' %(data_dir)
+subject_dir = '%s/SUBJECT_session_1/functional_mni/_scan_RfMRI_mx_645_rest/_csf_threshold_0.96/_gm_threshold_0.7/_wm_threshold_0.96/_compcor_ncomponents_5_selector_pc10.linear1.wm1.global1.motion1.quadratic1.gm0.compcor0.csf1/_bandpass_freqs_0.009.0.08/**' %(data_dir)
 hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/TASK/*reg*'
 hcp_resting_dir = '/home/despoB/connectome-data/SUBJECT/*rfMRI*/*reg*'
 
@@ -236,21 +233,23 @@ def gordon_communities():
 		Community_Number[i] = name_dict[df.Community[i]]
 	return Community_Number
 
-def flex_activity(subject, num_comps = 12,ignore_flex=4):
+def flex_activity(subject, num_comps = 12,ignore_flex=False,flex_thresh=3):
 	flex = '/home/despoB/mb3152/modularity/YeoBrainmapMNI152/FSL/Flexibility/YeoMD_%scomp_FSL_MNI152_thresh1e-5.nii' %(num_comps)
 	flex = nib.load(flex).get_data().astype('float64')
+	mask = nib.load('/usr/local/fsl-5.0.1/data/atlases/HarvardOxford/HarvardOxford-cort-maxprob-thr25-2mm.nii.gz').get_data()
 	components_engaged_var = []
 	components_engaged_mean = []
 	flex_activity = []
 	non_flex_activity= []
 	component_engagement = run_component_estimation(subject=subject,num_comps=num_comps,ignore_flex=ignore_flex)
 	epi_data = brain_graphs.load_subject_time_series(subject_dir.replace('SUBJECT',str(subject)))
-	epi_data[np.max(epi_data,axis=3)==0.0] = np.nan
+	epi_data[np.std(epi_data,axis=3)==0.0] = np.nan
+	epi_data[mask<=0] = np.nan
 	for i in range(epi_data.shape[-1]):
 		brain_data = epi_data[:,:,:,i]
-		non_flex_activity.append(np.nanmean(brain_data[flex<ignore_flex]))
-		flex_activity.append(np.nanmean(brain_data[flex>=ignore_flex]))
-		engagement = np.array(component_engagement[i])
+		non_flex_activity.append(np.nanmean(brain_data[flex<flex_thresh]))
+		flex_activity.append(np.nanmean(brain_data[flex>=flex_thresh]))
+		engagement = np.array(component_engagement[i]) 
 		components_engaged_var.append(1-np.std(engagement))
 		components_engaged_mean.append(len(engagement[engagement>(1./float(num_comps))]))
 	print pearsonr(components_engaged_var,flex_activity)
@@ -261,9 +260,10 @@ def flex_activity(subject, num_comps = 12,ignore_flex=4):
 	w = non_flex_activity
 	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/%s_flex_data_%s_%s.npy'%(subject,num_comps,ignore_flex), np.array([x,y,z,w]))
 
-def flex_activity_hcp(subject, task, num_comps = 12,ignore_flex=False):
+def flex_activity_hcp(subject, task, num_comps = 12,ignore_flex=False,flex_thresh=3):
 	flex = '/home/despoB/mb3152/modularity/YeoBrainmapMNI152/FSL/Flexibility/YeoMD_%scomp_FSL_MNI152_thresh1e-5.nii' %(num_comps)
 	flex = nib.load(flex).get_data().astype('float64')
+	mask = nib.load('/usr/local/fsl-5.0.1/data/atlases/HarvardOxford/HarvardOxford-cort-maxprob-thr25-2mm.nii.gz').get_data()
 	components_engaged_var = []
 	components_engaged_mean = []
 	flex_activity = []
@@ -273,14 +273,11 @@ def flex_activity_hcp(subject, task, num_comps = 12,ignore_flex=False):
 	subject_path = subject_path.replace('TASK',task)
 	epi_data = brain_graphs.load_subject_time_series(subject_path)
 	epi_data[np.std(epi_data,axis=3)==0.0] = np.nan
+	epi_data[mask<=0] = np.nan
 	for i in range(epi_data.shape[-1]):
 		brain_data = epi_data[:,:,:,i]
-		if ignore_flex == False:
-			non_flex_activity.append(np.nanmean(brain_data[flex<4.]))
-			flex_activity.append(np.nanmean(brain_data[flex>=4.]))
-		else:
-			non_flex_activity.append(np.nanmean(brain_data[flex<ignore_flex]))
-			flex_activity.append(np.nanmean(brain_data[flex>=ignore_flex]))
+		non_flex_activity.append(np.nanmean(brain_data[flex<flex_thresh]))
+		flex_activity.append(np.nanmean(brain_data[flex>=flex_thresh]))
 		engagement = np.array(component_engagement[i])
 		components_engaged_var.append(1-np.std(engagement))
 		components_engaged_mean.append(len(engagement[engagement>(1./float(num_comps))]))
@@ -832,7 +829,7 @@ def edges_all_performance(subjects,atlas,tasks=['WM_LR','RELATIONAL_LR','LANGUAG
 		mean.append(edges_task_performance(subjects,task,atlas))
 	return np.array(mean)
 
-def plot_corr_matrix(matrix, membership=known_membership):
+def plot_corr_matrix(matrix, membership):
 	swap_dict = {}
 	index = 0
 	corr_mat = np.zeros((matrix.shape))
@@ -900,14 +897,16 @@ def individual_graph_analyes(variables):
 	np.fill_diagonal(s_matrix,0.0)
 	pc = []
 	mod = []
+	wmd = []
 	for cost in np.array(range(5,16))*0.01:
 		graph = brain_graphs.matrix_to_igraph(s_matrix.copy(),cost,check_tri=True,interpolation='midpoint',normalize=True)
 		graph = graph.community_infomap(edge_weights='weight')
 		graph = brain_graphs.brain_graph(graph)
 		pc.append(np.array(graph.pc))
+		wmd.append(np.array(graph.wmd))
 		mod.append(graph.community.modularity)
 		del graph
-	return (mod,np.nanmean(pc,axis=0))
+	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0))
 
 def run_price(project,subject,task,ignore_flex=3):
 	if project == 'hcp':
@@ -949,7 +948,7 @@ def multi_slice(subject,task,project,atlas='power',gamma=1.0,omega=.1,cost=0.1,w
 	out_file = '/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_%s_msc_%s_%s_%s.npy' %(subject,atlas,window_size,cost,gamma,omega,task)
 	brain_graphs.multi_slice_community(matrix=matrix,cost=cost,out_file=out_file,omega=omega,gamma=gamma)
 
-def graph_metrics(subjects):
+def graph_metrics(subjects,task):
 	"""
 	run graph metrics or load them
 	"""
@@ -959,9 +958,13 @@ def graph_metrics(subjects):
 	thresh_matrices = []
 	variables = []
 	results = {}
+	if subjects[0][0] == '0':
+		project = 'nki'
+	else:
+		project = 'hcp'
 	for subject in subjects:
-		if os.path.isfile('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_matrix.npy'%(subject,atlas)):
-			s_matrix = np.load('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_matrix.npy'%(subject,atlas))
+		if os.path.isfile('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_matrix.npy'%(subject,atlas,task)):
+			s_matrix = np.load('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_matrix.npy'%(subject,atlas,task))
 			s_matrix[np.isnan(s_matrix)] = 0.0
 			np.fill_diagonal(s_matrix,0.0)
 			thresh_matrices.append(scipy.stats.zscore(s_matrix.reshape(-1)).reshape((num_nodes,num_nodes)).copy())
@@ -970,8 +973,9 @@ def graph_metrics(subjects):
 		else:
 			subjects.remove(subject)
 	try:
-		subject_pcs = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_pcs.npy' %(project))
-		subject_mods = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_mods.npy'%(project))
+		subject_pcs = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_pcs.npy' %(project,task))
+		subject_wmds = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_wmds.npy' %(project,task))
+		subject_mods = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_mods.npy'%(project,task))
 		del variables
 	except:
 		from multiprocessing import Pool
@@ -979,11 +983,14 @@ def graph_metrics(subjects):
 		results = pool.map(individual_graph_analyes,variables)
 		subject_pcs = []
 		subject_mods = []
+		subject_wmds = []
 		for r in results:
 			subject_mods.append(np.nanmean(r[0]))
 			subject_pcs.append(np.nanmean(r[1],axis=0))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_pcs.npy' %(project),np.array(subject_pcs))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_mods.npy' %(project),np.array(subject_mods))
+			subject_wmds.append(np.nanmean(r[2],axis=0))
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_pcs.npy' %(project,task),np.array(subject_pcs))
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_wms.npy' %(project,task),np.array(subject_wmds))
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_mods.npy' %(project,task),np.array(subject_mods))
 	subject_mods = np.array(subject_mods)
 	subject_pcs = np.array(subject_pcs)
 	subject_pcs[np.isnan(subject_pcs)] = 0.0
@@ -992,14 +999,14 @@ def graph_metrics(subjects):
 	results['thresh_matrices'] = np.array(thresh_matrices)
 	return results
 
-def dynamic_graph_metrics(subject,atlas='power',window_size=100,msc_cost=.1,gamma=1,omega=.1):
+def dynamic_graph_metrics(subject,task,atlas='power',window_size=100,msc_cost=.1,gamma=1,omega=.1):
 	"""
 	multi slice stuff
 	"""
 	subject_changes = [] #communities at each node
 	subject_num_changes = [] #number of changes at a node
 	for subject in subjects:
-		msc = np.load('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_%s_msc_%s_%s.npy' %(subject,atlas,window_size,msc_cost,gamma,omega))
+		msc = np.load('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_%s_msc_%s_%s_%s.npy' %(subject,atlas,window_size,msc_cost,gamma,omega,task))
 		num_communities = []
 		for i in range(msc.shape[1]):
 			num_communities.append(len(np.unique(msc[:,i])))
@@ -1037,27 +1044,33 @@ def edge_weight_and_performance(task,subjects=hcp_subjects,atlas='Power',mean=Fa
 	sns.violinplot([matrix[np.ix_(connectors,connectors)].reshape(-1),matrix[np.ix_(connectors,non_connectors)].reshape(-1),matrix[np.ix_(non_connectors,non_connectors)].reshape(-1)])
 	plt.show()
 
+def check_motion(subjects):
+	for subject in subjects:
+	    e = np.load('/home/despoB/mb3152/dynamic_mod/component_activation/%s_12_False_engagement.npy' %(subject))
+	    m = np.loadtxt('/home/despoB/mb3152/data/nki_data/preprocessed/pipeline_comp_cor_and_standard/%s_session_1/frame_wise_displacement/_scan_RfMRI_mx_645_rest/FD.1D'%(subject))
+	    print pearsonr(m,np.std(e.reshape(900,12),axis=1))
+
 def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1,omega=.1,msc_cost = 0.1,window_size=100,pc_thresh=75):
 	if atlas == 'power':
 		known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
 		known_membership[known_membership==-1] = 0
 		colors = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[34].values)
 		names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
-	if atlas =='gordon':
-		df = pd.read_excel('/home/despoB/mb3152/dynamic_mod/Parcels.xlsx')
-		names = df.Community
-		known_membership = np.zeros(len(names))
-		for i,c in enumerate(np.unique(names)):
-			known_membership[df.ParcelID[df.Community==c]-1]=i
-		names[names=='None'] = 'Uncertain'
+	# if atlas =='gordon':
+	# 	df = pd.read_excel('/home/despoB/mb3152/dynamic_mod/Parcels.xlsx')
+	# 	names = df.Community
+	# 	known_membership = np.zeros(len(names))
+	# 	for i,c in enumerate(np.unique(names)):
+	# 		known_membership[df.ParcelID[df.Community==c]-1]=i
+	# 	names[names=='None'] = 'Uncertain'
 	num_nodes = len(known_membership)
-	if subjects == None: #grab subjects with data if none are passed.
-		subjects = []
-		subject_paths = glob.glob('/home/despoB/mb3152/dynamic_mod/matrices/*_%s_%s_%s_msc_%s_%s.npy' %(atlas,window_size,msc_cost,gamma,omega))
-		for s in subject_paths:
-			subjects.append(s.split('/')[-1].split('_')[0])
+	# if subjects == None: #grab subjects with data if none are passed.
+	# 	subjects = []
+	# 	subject_paths = glob.glob('/home/despoB/mb3152/dynamic_mod/matrices/*_%s_%s_%s_msc_%s_%s.npy' %(atlas,window_size,msc_cost,gamma,omega))
+	# 	for s in subject_paths:
+	# 		subjects.append(s.split('/')[-1].split('_')[0])
 	"""
-	make a matrix of each nodes PC correlation to all edges in the graph.
+	Make a matrix of each nodes PC correlation to all edges in the graph.
 	"""
 	#probably want to do something here for analyses across tasks
 	static_results = graph_metrics(subjects)
@@ -1273,11 +1286,11 @@ def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1
 	pc_by_individual_wcd = np.zeros((num_nodes,len(np.unique(known_membership))))
 	pc_by_individual_bcd = np.zeros((num_nodes,len(np.unique(known_membership))))
 	pc_by_individual_mod = np.zeros((num_nodes,len(np.unique(known_membership))))
-		for ix,i in enumerate(range(num_nodes)):
-			for c,name in zip(range(len(np.unique(known_membership))),names):
-	 			pc_by_individual_wcd[ix,c] = pearsonr(subject_pcs[:,i],community_wcd[:,c])[0]
-	 			pc_by_individual_bcd[ix,c] = pearsonr(subject_pcs[:,i],community_bcd[:,c])[0]
-	 			pc_by_individual_mod[ix,c] = pearsonr(subject_pcs[:,i],community_wcd[:,c]/community_bcd[:,c])[0]
+	for ix,i in enumerate(range(num_nodes)):
+		for c,name in zip(range(len(np.unique(known_membership))),names):
+				pc_by_individual_wcd[ix,c] = pearsonr(subject_pcs[:,i],community_wcd[:,c])[0]
+				pc_by_individual_bcd[ix,c] = pearsonr(subject_pcs[:,i],community_bcd[:,c])[0]
+				pc_by_individual_mod[ix,c] = pearsonr(subject_pcs[:,i],community_wcd[:,c]/community_bcd[:,c])[0]
 
 	# No relation beween connector node's PC modulation of single network with nodes' connectivity to that network, suggesting connector nodes work together. 
 	strength = np.nanmean(community_stregth,axis=0) #average connectivity to each module by each nodes across subjects
@@ -1348,30 +1361,76 @@ def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1
 	for community in np.unique(known_membership):
 		network_change_corr[community==known_membership] = scipy.stats.ttest_ind(community_mod_high_ratio[:,community].reshape(-1),community_mod_low_ratio[:,community].reshape(-1))[0]
 
-	# brain_graphs.make_image('/home/despoB/mb3152/dynamic_mod/atlases/%s_template.nii' %(atlas),'/home/despoB/mb3152/dynamic_mod/brain_figures/mod_change_corr_hcp_%s' %(atlas),mod_change_corr*100)
+	brain_graphs.make_image('/home/despoB/mb3152/dynamic_mod/atlases/%s_template.nii' %(atlas),'/home/despoB/mb3152/dynamic_mod/brain_figures/mod_change_corr_hcp_%s' %(atlas),mod_change_corr*100)
 
 """
-SGE
+SGE Inputs
 """
 
 if len(sys.argv) > 1:
-	if sys.argv[1] == 'multislice'
+	if sys.argv[1] == 'multislice':
 		subject = sys.argv[2]
 		task = sys.argv[3]
-		if task == 'nki':
-			project == 'nki'
+		if 'nki' in task:
+			project = 'nki'
 			task = 'mb_rest_645'
 		if 'rfMRI' in task:
 			project = 'hcp'
-		else:
+		if 'tfMRI' in task:
 			project = 'hcp_task'
-		print subject, task
+		print subject, task , project
 		multi_slice(subject,task,project)
+	if sys.argv[1] == 'flex_activity':
+		subject = sys.argv[2]
+		flex_activity(subject=subject,ignore_flex=False)
+	if sys.argv[1] == 'flex_activity_hcp':
+		subject = sys.argv[2]
+		task = sys.argv[3]
+		flex_activity_hcp(subject=subject,task=task,ignore_flex=False)
 
 """
-check motion
+Methods
+
+Pre-processing
+HCP, minimally pre-processed, + WM, CSF, Global
+NKI, standard with GSR to match HCP
+
+1.	Resting-State Matrix
+	a.	HCP, do all, average
+	b.	NKI, MB .645
+2.	EWMC, MSM
+	a.	HCP task LR and RL
+	b.	HCP rest
+	c.	NKI, MB .645
+3.	Component Estimates
+	a.	HCP Rest, LR1, LR2
+	b.	HCP Task, LR
+	c.	NKI, MB .645
+
+Results
+1.	Correlations between components engaged (1-variance).
+	a.	NKI Rest Data--flex_activity()
+	b.	HCP Rest Data--flex_activity_hcp()
+	c.	HCP Task Data--flex_activity_hcp(task)
+		i.	Task frames only?
+2.	Nodes that change the most, have high PC, predict higher modularity.
+	a.	NKI Rest Data
+	b.	HCP Rest Data
+	c.	HCP Task Data
+		i.	Map for each task.
+		ii.	Does PC of each node correlate with changes at that node across tasks? 
+3.	Correlation matrix figure—connector nodes’ PC positively correlates with between module decreases.
+	a.	NKI Rest Data
+	b.	HCP Rest Data
+		i.	Correlation between all PC and modularity is weak.
+4.	Correlation between PC values/nodal changes and performance?
+	a.	HCP Task data
+	b.	Do correlation between rest changes and behavioral measures, same nodes?
+5.	Correlation between edge weights and task performance
+	a.	HCP Task Data
+	b.	Do correlation between rest edge weights and behavioral measures? Same edges?
+6.	Rich Connector Club.
+	a.	Looks like using the PC cutoff gets the same nodes?
+7.	In multi-slice modularity, is there an increase in BOLD magnitude in the connector regions (perhaps defined statically) during shifts to the right (more PC)? 
+	Does each regions PC during multi-slice correlate with it’s activity? Maybe only connector nodes?
 """
-# for subject in subjects:
-#     e = np.load('/home/despoB/mb3152/dynamic_mod/component_activation/%s_12_False_engagement.npy' %(subject))
-#     m = np.loadtxt('/home/despoB/mb3152/data/nki_data/preprocessed/pipeline_comp_cor_and_standard/%s_session_1/frame_wise_displacement/_scan_RfMRI_mx_645_rest/FD.1D'%(subject))
-#     print pearsonr(m,np.std(e.reshape(900,12),axis=1)
