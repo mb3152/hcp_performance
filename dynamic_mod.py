@@ -948,6 +948,13 @@ def multi_slice(subject,task,project,atlas='power',gamma=1.0,omega=.1,cost=0.1,w
 	out_file = '/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_%s_msc_%s_%s_%s.npy' %(subject,atlas,window_size,cost,gamma,omega,task)
 	brain_graphs.multi_slice_community(matrix=matrix,cost=cost,out_file=out_file,omega=omega,gamma=gamma)
 
+def get_project(subjects):
+	if subjects[0][0] == '0':
+		project = 'nki'
+	else:
+		project = 'hcp'
+	return project
+
 def graph_metrics(subjects,task):
 	"""
 	run graph metrics or load them
@@ -958,10 +965,7 @@ def graph_metrics(subjects,task):
 	thresh_matrices = []
 	variables = []
 	results = {}
-	if subjects[0][0] == '0':
-		project = 'nki'
-	else:
-		project = 'hcp'
+	project = get_project(subjects)
 	for subject in subjects:
 		if os.path.isfile('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_matrix.npy'%(subject,atlas,task)):
 			s_matrix = np.load('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_matrix.npy'%(subject,atlas,task))
@@ -1034,10 +1038,11 @@ def edge_weight_and_performance(task,subjects=hcp_subjects,atlas='Power',mean=Fa
 		mean = edges_all_performance(subjects,atlas)
 	else:
 		mean = edges_task_performance(subjects,atlas,task)
-	graph_metrics = graph_metrics(subjects)
+	project = get_project(subjects)
+	graph_metrics = graph_metrics(subjects,task)
 	pc = np.nanmean(graph_metrics['subject_pcs'],axis=0)
 	connectors = np.argwhere(pc>=thresh).reshape(-1)
-	non_connectors =  np.argwhere(pc<thresh).reshape(-1)
+	non_connectors = np.argwhere(pc<thresh).reshape(-1)
 	matrix = np.nansum(np.absolute(mean),axis=0)
 	print thresh, scipy.stats.ttest_ind(matrix[np.ix_(connectors,non_connectors)].reshape(-1),matrix[np.ix_(non_connectors,non_connectors)].reshape(-1))
 	print thresh, scipy.stats.ttest_ind(matrix[np.ix_(connectors,connectors)].reshape(-1),matrix[np.ix_(non_connectors,non_connectors)].reshape(-1))
@@ -1050,7 +1055,7 @@ def check_motion(subjects):
 	    m = np.loadtxt('/home/despoB/mb3152/data/nki_data/preprocessed/pipeline_comp_cor_and_standard/%s_session_1/frame_wise_displacement/_scan_RfMRI_mx_645_rest/FD.1D'%(subject))
 	    print pearsonr(m,np.std(e.reshape(900,12),axis=1))
 
-def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1,omega=.1,msc_cost = 0.1,window_size=100,pc_thresh=75):
+def main_analyes(task,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1,omega=.1,msc_cost = 0.1,window_size=100,pc_thresh=75):
 	if atlas == 'power':
 		known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
 		known_membership[known_membership==-1] = 0
@@ -1073,10 +1078,10 @@ def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1
 	Make a matrix of each nodes PC correlation to all edges in the graph.
 	"""
 	#probably want to do something here for analyses across tasks
-	static_results = graph_metrics(subjects)
-	dynamic_results = dynamic_graph_metrics(subjects)
-
+	static_results = graph_metrics(subjects,task)
+	dynamic_results = dynamic_graph_metrics(subjects,task)
 	subject_pcs = static_results['subject_pcs']
+	thresh_matrices = static_results['thresh_matrices']
 	pc_edge_corr = np.zeros((subject_pcs.shape[1],subject_pcs.shape[1],subject_pcs.shape[1]))
 	mean_subject_pcs = np.nanmean(subject_pcs,axis=0)
 	for i in range(subject_pcs.shape[1]):
@@ -1095,14 +1100,13 @@ def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1
 	plt.yticks(size=16)
 	plt.xticks(size=16)
 	plt.show()
-	#average version (community averaged)
+	#community averaged weight changes. This is not just an average of above, but looking at average connectivity between networks and PC
 	bcd_pc_network_matrix_mod = np.zeros((num_nodes,len(np.unique(known_membership)),len(np.unique(known_membership))))
 	for n in range(num_nodes):
 		for c1,c2, in combinations(range(len(np.unique(known_membership))),2):
 			community_nodes = np.where(known_membership==c1)[0]
 			non_community_nodes = np.where(known_membership==c2)[0]
 			bcds = []
-			wcds = []
 			for s in range(thresh_matrices.shape[0]):
 				bcds.append(np.nanmean(thresh_matrices[s][np.ix_(community_nodes,non_community_nodes)]))
 			bcd = pearsonr(subject_pcs[:,n],bcds)[0]
@@ -1168,14 +1172,14 @@ def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1
 	#test if some networks are more driven by connector nodes than non-connector nodes.
 	print 'within community degree is increased more than between community degree'
 	for community, name in zip(np.unique(networks),x_names):
-		print name, scipy.stats.ttest_ind(community_mod_high_wcd[:,community].reshape(-1),community_mod_bcd[:,community].reshape(-1))
+		print name, scipy.stats.ttest_ind(community_mod_wcd[:,community].reshape(-1),community_mod_bcd[:,community].reshape(-1))
 	print 'within community degree is increased more by connector nodes than non_connector nodes'
 	for community, name in zip(np.unique(networks),x_names):
 		print name, scipy.stats.ttest_ind(community_mod_high_wcd[:,community].reshape(-1),community_mod_low_wcd[:,community].reshape(-1))
-	print 'between community degree is increased more by connector nodes than non_connector nodes'
+	print 'between community degree is decreased more by connector nodes than non_connector nodes'
 	for community, name in zip(np.unique(networks),x_names):
 		print name, scipy.stats.ttest_ind(community_mod_high_bcd[:,community].reshape(-1),community_mod_low_bcd[:,community].reshape(-1))
-	print 'ration of community degree to between community degree is increased more by connector nodes than non_connector nodes'
+	print 'ratio of community degree to between community degree is increased more by connector nodes than non_connector nodes'
 	for community, name in zip(np.unique(networks),x_names):
 		print name, scipy.stats.ttest_ind(community_mod_high_ratio[:,community].reshape(-1),community_mod_low_ratio[:,community].reshape(-1))
 
@@ -1288,9 +1292,21 @@ def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1
 	pc_by_individual_mod = np.zeros((num_nodes,len(np.unique(known_membership))))
 	for ix,i in enumerate(range(num_nodes)):
 		for c,name in zip(range(len(np.unique(known_membership))),names):
-				pc_by_individual_wcd[ix,c] = pearsonr(subject_pcs[:,i],community_wcd[:,c])[0]
-				pc_by_individual_bcd[ix,c] = pearsonr(subject_pcs[:,i],community_bcd[:,c])[0]
-				pc_by_individual_mod[ix,c] = pearsonr(subject_pcs[:,i],community_wcd[:,c]/community_bcd[:,c])[0]
+			pc_by_individual_wcd[ix,c] = pearsonr(subject_pcs[:,i],community_wcd[:,c])[0]
+			pc_by_individual_bcd[ix,c] = pearsonr(subject_pcs[:,i],community_bcd[:,c])[0]
+			pc_by_individual_mod[ix,c] = pearsonr(subject_pcs[:,i],community_wcd[:,c]/community_bcd[:,c])[0]
+
+	#last test of specifity, have not run yet! !! ! 
+	#Mean connectivity of each node to each network,relative to overall strength
+	#modulation of a network, realtive to overall modulation values.
+	community_stregth = np.zeros((len(subjects),num_nodes,len(np.unique(known_membership))))
+	community_mod_stregth = np.zeros((len(subjects),num_nodes,len(np.unique(known_membership))))
+	for i,subject in enumerate(subjects):
+		for n in range(num_nodes):
+			for community in np.unique(known_membership):
+				community_nodes = np.where(known_membership==community)[0]
+				community_stregth[i,n,community] = (np.nanmean(thresh_matrices[i,n,community_nodes])/np.nanmean(thresh_matrices[i,n,:]))**2
+				community_mod_stregth[i,n,community] = (np.nanmean(pc_edge_corr[i,n,community_nodes])/np.nanmean(pc_edge_corr[i,n,:]))**2
 
 	# No relation beween connector node's PC modulation of single network with nodes' connectivity to that network, suggesting connector nodes work together. 
 	strength = np.nanmean(community_stregth,axis=0) #average connectivity to each module by each nodes across subjects
@@ -1314,18 +1330,6 @@ def main_analyes(tasks,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1
 			connector_modulation_strength.append(val)
 		else:
 			non_connector_modulation_strength.append(val)
-
-	#last test of specifity, have not run yet! !! ! 
-	#Mean connectivity of each node to each network,relative to overall strength
-	#modulation of a network, realtive to overall modulation values.
-	community_stregth = np.zeros((len(subjects),num_nodes,len(np.unique(known_membership))))
-	community_mod_stregth = np.zeros((len(subjects),num_nodes,len(np.unique(known_membership))))
-	for i,subject in enumerate(subjects):
-		for n in range(num_nodes):
-			for community in np.unique(known_membership):
-				community_nodes = np.where(known_membership==community)[0]
-				community_stregth[i,n,community] = 1 - (np.nanmean(thresh_matrices[i,n,community_nodes])/np.nanmean(thresh_matrices[i,n,:]))**2
-				community_mod_stregth[i,n,community] = 1 - (np.nanmean(pc_edge_corr[i,n,community_nodes])/np.nanmean(pc_edge_corr[i,n,:]))**2
 	
 	#need matrix of node to community strength across subjects for this.
 	"""
@@ -1417,8 +1421,8 @@ Results
 	a.	NKI Rest Data
 	b.	HCP Rest Data
 	c.	HCP Task Data
-		i.	Map for each task.
-		ii.	Does PC of each node correlate with changes at that node across tasks? 
+		i.	Brain Map for each task.
+		ii.	Do nodes that increase PC in a single task also increase community changes?
 3.	Correlation matrix figure—connector nodes’ PC positively correlates with between module decreases.
 	a.	NKI Rest Data
 	b.	HCP Rest Data
@@ -1426,7 +1430,7 @@ Results
 4.	Correlation between PC values/nodal changes and performance?
 	a.	HCP Task data
 	b.	Do correlation between rest changes and behavioral measures, same nodes?
-5.	Correlation between edge weights and task performance
+5.	Correlation between edge weights and task performance, are these connector node edges?
 	a.	HCP Task Data
 	b.	Do correlation between rest edge weights and behavioral measures? Same edges?
 6.	Rich Connector Club.
