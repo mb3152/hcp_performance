@@ -1068,6 +1068,7 @@ def dynamic_graph_metrics(subjects,task,atlas='power',window_size=100,msc_cost=0
 		subject_changes_array = np.zeros(shape)
 		subject_num_changes_array = np.zeros(shape)
 		for i in range(shape[0]):
+			print len(subject_changes[i])
 			subject_changes_array[i] = subject_changes[i]
 			subject_num_changes_array[i] = subject_num_changes[i]
 		results['subject_changes'] = subject_changes_array
