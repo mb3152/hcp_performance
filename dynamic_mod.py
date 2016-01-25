@@ -36,8 +36,8 @@ import powerlaw
 
 data_dir = '/home/despoB/mb3152/data/nki_data/preprocessed/pipeline_comp_cor_and_standard'
 subject_dir = '%s/SUBJECT_session_1/functional_mni/_scan_RfMRI_mx_645_rest/_csf_threshold_0.96/_gm_threshold_0.7/_wm_threshold_0.96/_compcor_ncomponents_5_selector_pc10.linear1.wm1.global1.motion1.quadratic1.gm0.compcor0.csf1/_bandpass_freqs_0.009.0.08/**' %(data_dir)
-hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/TASK/*reg*'
-hcp_resting_dir = '/home/despoB/connectome-data/SUBJECT/*rfMRI*/*reg*'
+hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
+hcp_resting_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
 
 nki_subjects = ['0194023', '0185428', '0123657', '0141795', '0163508', '0123971', '0158411', '0185781', '0103714',
  '0174363', '0188854', '0136303', '0144667', '0139480', '0163228', '0154423', '0187635', '0179005', '0154555',
@@ -260,7 +260,7 @@ def flex_activity(subject, num_comps = 12,ignore_flex=False,flex_thresh=3):
 	w = non_flex_activity
 	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/%s_flex_data_%s_%s.npy'%(subject,num_comps,ignore_flex), np.array([x,y,z,w]))
 
-def flex_activity_hcp(subject, task, num_comps = 12,ignore_flex=False,flex_thresh=3):
+def flex_activity_hcp(subject,task,num_comps=12,ignore_flex=False,flex_thresh=3):
 	flex = '/home/despoB/mb3152/modularity/YeoBrainmapMNI152/FSL/Flexibility/YeoMD_%scomp_FSL_MNI152_thresh1e-5.nii' %(num_comps)
 	flex = nib.load(flex).get_data().astype('float64')
 	mask = nib.load('/usr/local/fsl-5.0.1/data/atlases/HarvardOxford/HarvardOxford-cort-maxprob-thr25-2mm.nii.gz').get_data()
@@ -289,46 +289,35 @@ def flex_activity_hcp(subject, task, num_comps = 12,ignore_flex=False,flex_thres
 	w = non_flex_activity
 	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/%s_flex_data_%s_%s_%s.npy'%(subject,num_comps,ignore_flex,task), np.array([x,y,z,w]))
 
-def pc_activity(subject,num_comps = 12,ignore_flex=4):
+def pc_activity_hcp(subject,task,num_comps=12,ignore_flex=False,subjects=hcp_subjects):
+	subjects = remove_missing_subjects(subjects,'REST','power')
+	static_results = graph_metrics(subjects,'REST','power')
 	parcel_path = '/home/despoB/mb3152/dynamic_mod/atlases/%s_template.nii' %('power')
-	epi_data = brain_graphs.load_subject_time_series(subject_dir.replace('SUBJECT',str(subject)))
-	data = pd.read_csv('/home/despoB/mb3152/modularity/mmc3.csv')
-	data['new'] = np.ones(len(data))
-	for x2,y2,z2,pc in zip(data.X2,data.Y2,data.Z2,data.PC):
-		data.new[data[data.X1==x2][data.Z1==z2][data.Y1==y2].index[0]] = pc
-	values_dict = data.new.to_dict()
-
-	# f = open('/home/despoB/mb3152/dynamic_mod/matrices/%s_graph.pkl'%(atlas))
-	# g_partition = pickle.load(f)[0]
-	# f.close()
-	# matrix = brain_graphs.time_series_to_matrix(subject_time_series=epi_data,voxel=False,parcel_path=parcel_path)
-	# graph = brain_graphs.matrix_to_igraph(matrix.copy(),cost=.1)
-	# partition = brain_graphs.brain_graph(VertexClustering(graph, membership=g_partition.community.membership))
-	# partition = brain_graphs.recursive_network_partition(matrix=brain_graphs.time_series_to_matrix(epi_data,parcel_path),parcel_path=parcel_path,max_cost=.5)[0]
+	mask = nib.load('/usr/local/fsl-5.0.1/data/atlases/HarvardOxford/HarvardOxford-cort-maxprob-thr25-2mm.nii.gz').get_data()
+	if 'REST' in task:
+		subject_path = hcp_resting_dir.replace('SUBJECT',str(subject))
+		task = 'rfMRI_REST1_RL'	
+	else:
+		task = 'tfMRI_%s_RL' %(task)
+		subject_path = hcp_subject_dir.replace('SUBJECT',str(subject))
+	subject_path = subject_path.replace('TASK',task)
+	epi_data = brain_graphs.load_subject_time_series(subject_path)
+	epi_data[np.std(epi_data,axis=3)==0.0] = np.nan
+	epi_data[mask<=0] = np.nan
+	pc = static_results['subject_pcs']
+	pc = np.nanmean(pc,axis=0)
 	template = np.array(nib.load(parcel_path).get_data())
 	components_engaged_var = []
 	components_engaged_mean = []
 	high_pc_activity = []
 	low_pc_activity = []
 	epi_data[np.std(epi_data,axis=3)==0.] = np.nan
-	pc_array = nib.load('/home/despoB/mb3152/modularity/figures/pc.nii').get_data()
-	component_engagement = run_component_estimation(subject,num_comps,ignore_flex=ignore_flex)
-	pc_array = np.zeros(pc_array.shape)
+	component_engagement = run_component_estimation_hcp(subject=subject,num_comps=num_comps,ignore_flex=ignore_flex,task=task)
+	pc_array = np.zeros(template.shape)
 	pc_array[:,:,:,] = np.nan
-	# wmd_array = pc_array.copy()
-	for i in range(len(values_dict.values())):
-		pc_array[template==i+1] = values_dict.values()[i]
-	# for i in range(len(partition.wmd)):
-	# 	wmd_array[template==i+1] = partition.wmd[i]
-	# pc_array[np.nanstd(epi_data,axis=3)==0] = np.nan
-	# pc_thresh = np.percentile(pc_array[np.isnan(pc_array)==False],80,interpolation='lower')
-	# wmd_thresh = 1e-5
-	# connector_array = pc_array.copy()
-	# connector_array[pc_array<pc_thresh] = np.nan
-	# connector_array[wmd_array<wmd_thresh] = np.nan
-	# connector_ay[np.isnan(connector_array)==False] = 1
-	pc_thresh = 4
-	# wmd_thresh = 1e-5
+	for i in range(len(pc)):
+		pc_array[template==i+1] = pc[i]
+	pc_thresh = np.percentile(pc_array[np.isnan(pc_array)==False],75,interpolation='lower')
 	print pc_thresh
 	for i in range(epi_data.shape[-1]):
 		brain_data = epi_data[:,:,:,i]
@@ -343,8 +332,7 @@ def pc_activity(subject,num_comps = 12,ignore_flex=4):
 	y = components_engaged_mean
 	z = high_pc_activity
 	w = low_pc_activity
-	pc_thresh=  'power' + str(pc_thresh)
-	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/%s_pc_data_%s_%s_%s.npy'%(subject,num_comps,ignore_flex,pc_thresh), np.array([x,y,z,w]))
+	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/pc_data_%s_%s_%s_%s.npy'%(subject,num_comps,ignore_flex,task), np.array([x,y,z,w]))
 
 def read_results_hcp(task,subjects=None,atlas='Shen',a_type='flex',corr_type='var',num_comps=12,ignore_flex=False,pc_thresh=8000,plot=False):
 	if subjects == None:
@@ -1429,9 +1417,10 @@ if len(sys.argv) > 1:
 			project = 'hcp_task'
 		print subject, task , project
 		multi_slice(subject,task,project)
-	if sys.argv[1] == 'flex_activity':
+	if sys.argv[1] == 'pc_activity_hcp':
 		subject = sys.argv[2]
-		flex_activity(subject=subject,ignore_flex=False)
+		task = sys.argv[3]
+		pc_activity_hcp(subject=subject,task=task,ignore_flex=False)
 	if sys.argv[1] == 'flex_activity_hcp':
 		subject = sys.argv[2]
 		task = sys.argv[3]
