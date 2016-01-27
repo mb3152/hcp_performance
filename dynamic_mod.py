@@ -34,18 +34,8 @@ import powerlaw
 #build graphs for when no variance versus high variance, look at modularity and PC and WMD. Perhaps calculate 
 #modularity without PC nodes / See if most of the between module connections come from PC nodes.
 
-data_dir = '/home/despoB/mb3152/data/nki_data/preprocessed/pipeline_comp_cor_and_standard'
-subject_dir = '%s/SUBJECT_session_1/functional_mni/_scan_RfMRI_mx_645_rest/_csf_threshold_0.96/_gm_threshold_0.7/_wm_threshold_0.96/_compcor_ncomponents_5_selector_pc10.linear1.wm1.global1.motion1.quadratic1.gm0.compcor0.csf1/_bandpass_freqs_0.009.0.08/**' %(data_dir)
 hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
 hcp_resting_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
-
-nki_subjects = ['0194023', '0185428', '0123657', '0141795', '0163508', '0123971', '0158411', '0185781', '0103714',
- '0174363', '0188854', '0136303', '0144667', '0139480', '0163228', '0154423', '0187635', '0179005', '0154555',
- '0150404', '0168357', '0192197', '0137496', '0159429', '0142673', '0180093', '0141860', '0116065', '0134795',
- '0150525', '0196198', '0162704', '0193358', '0105290', '0137073', '0112249', '0117168', '0125747', '0119947',
- '0138333', '0114688', '0167693', '0127665', '0117747', '0113436', '0127484', '0172267', '0152992', '0197584',
- '0176913', '0176479', '0188324', '0181179', '0159461', '0188757', '0102826', '0170400', '0112586', '0161348',
- '0114326', '0105409', '0105316', '0152366', '0157908']
 hcp_subjects = os.listdir('/home/despoB/connectome-data/')
 
 def entropy(s):
@@ -180,7 +170,6 @@ def run_component_estimation(subject,num_comps=12,ignore_flex=False):
 	return e
 
 def run_component_estimation_hcp(subject,task,num_comps=12,ignore_flex=False):
-	global subject_dir
 	global hcp_subject_dir
 	try:
 		e = np.load('/home/despoB/mb3152/dynamic_mod/component_activation/%s_%s_%s_%s_engagement.npy'%(subject,num_comps,ignore_flex,task))
@@ -232,33 +221,6 @@ def gordon_communities():
 	for i in range(333):
 		Community_Number[i] = name_dict[df.Community[i]]
 	return Community_Number
-
-def flex_activity(subject, num_comps = 12,ignore_flex=False,flex_thresh=3):
-	flex = '/home/despoB/mb3152/modularity/YeoBrainmapMNI152/FSL/Flexibility/YeoMD_%scomp_FSL_MNI152_thresh1e-5.nii' %(num_comps)
-	flex = nib.load(flex).get_data().astype('float64')
-	mask = nib.load('/usr/local/fsl-5.0.1/data/atlases/HarvardOxford/HarvardOxford-cort-maxprob-thr25-2mm.nii.gz').get_data()
-	components_engaged_var = []
-	components_engaged_mean = []
-	flex_activity = []
-	non_flex_activity= []
-	component_engagement = run_component_estimation(subject=subject,num_comps=num_comps,ignore_flex=ignore_flex)
-	epi_data = brain_graphs.load_subject_time_series(subject_dir.replace('SUBJECT',str(subject)))
-	epi_data[np.std(epi_data,axis=3)==0.0] = np.nan
-	epi_data[mask<=0] = np.nan
-	for i in range(epi_data.shape[-1]):
-		brain_data = epi_data[:,:,:,i]
-		non_flex_activity.append(np.nanmean(brain_data[flex<flex_thresh]))
-		flex_activity.append(np.nanmean(brain_data[flex>=flex_thresh]))
-		engagement = np.array(component_engagement[i]) 
-		components_engaged_var.append(1-np.std(engagement))
-		components_engaged_mean.append(len(engagement[engagement>(1./float(num_comps))]))
-	print pearsonr(components_engaged_var,flex_activity)
-	print pearsonr(components_engaged_var,non_flex_activity)
-	x = components_engaged_var
-	y = components_engaged_mean
-	z = flex_activity
-	w = non_flex_activity
-	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/%s_flex_data_%s_%s.npy'%(subject,num_comps,ignore_flex), np.array([x,y,z,w]))
 
 def flex_activity_hcp(subject,task,num_comps=12,ignore_flex=False,flex_thresh=3):
 	flex = '/home/despoB/mb3152/modularity/YeoBrainmapMNI152/FSL/Flexibility/YeoMD_%scomp_FSL_MNI152_thresh1e-5.nii' %(num_comps)
@@ -334,37 +296,23 @@ def pc_activity_hcp(subject,task,num_comps=12,ignore_flex=False,subjects=hcp_sub
 	w = low_pc_activity
 	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/pc_data_%s_%s_%s_%s.npy'%(subject,num_comps,ignore_flex,task), np.array([x,y,z,w]))
 
-def read_results_hcp(task,subjects=None,atlas='Shen',a_type='flex',corr_type='var',num_comps=12,ignore_flex=False,pc_thresh=8000,plot=False):
-	if subjects == None:
-		subjects = []
-		if a_type == 'flex':
-			subject_files = glob.glob('/home/despoB/mb3152/dynamic_mod/component_activation/**_%s_data_%s_%s_%s.npy' %(a_type,num_comps,ignore_flex,task))
-			for subject_file in subject_files:
-				subjects.append(subject_file.split('_')[2].split('/')[1])  		
-		else:
-			subject_files = glob.glob('/home/despoB/mb3152/dynamic_mod/component_activation/0**_%s_data_%s_%s_%s.npy' %(a_type,num_comps,ignore_flex,pc_thresh))
-			for subject_file in subject_files:
-				subjects.append(subject_file.split('_')[2].split('/')[1])  	   
-	d = []
-	for i in subject_files:
-		d.append(list(np.load(i)))
-	data = np.array(d)
+def print_results(data):
 	print 'High Flex'
-	for subject in range(len(subjects)):
+	for subject in range(data.shape[0]):
 		if corr_type == 'var':
 			print pearsonr(data[subject,0,:],data[subject,2,:]),subjects[subject]
 		else:
 			print pearsonr(data[subject,1,:],data[subject,2,:]),subjects[subject]
 	print '______________________'
 	print 'Low Flex'
-	for subject in range(len(subjects)):
+	for subject in range(data.shape[0]):
 		if corr_type == 'var':
 			print pearsonr(data[subject,0,:],data[subject,3,:]),subjects[subject]
 		else:
 			print pearsonr(data[subject,1,:],data[subject,3,:]),subjects[subject]
 	print '______________________'
 	print 'Difference'
-	for subject in range(len(subjects)):
+	for subject in range(data.shape[0]):
 		if corr_type == 'var':
 			print pearsonr(data[subject,0,:],data[subject,2,:])[0] - pearsonr(data[subject,0,:],data[subject,3,:])[0], subjects[subject]
 		else:
@@ -376,104 +324,56 @@ def read_results_hcp(task,subjects=None,atlas='Shen',a_type='flex',corr_type='va
 	else:
 		print pearsonr(data[:,1,:].reshape(-1),data[:,2,:].reshape(-1))
 		print pearsonr(data[:,1,:].reshape(-1),data[:,3,:].reshape(-1))
-	if plot == True:
-		df = pd.DataFrame(data=np.array([data[:,0,:].reshape(-1),data[:,2,:].reshape(-1),data[:,3,:].reshape(-1)]).transpose(),columns=['Components Engaged','High Flexibility','Low Flexibility'])
-		g = sns.regplot('Components Engaged','High Flexibility', df,color='Red',scatter=True,scatter_kws={'alpha':.1})
-		# plt.xlim(min(df['Components Engaged']),max(df['Components Engaged']))
+
+def plot_results(data,columns,color,local=True):
+	if local == False:
+		df = pd.DataFrame(data=np.array([data[:,0,:].reshape(-1),data[:,2,:].reshape(-1),data[:,3,:].reshape(-1)]).transpose(),columns=columns)
+		g = sns.regplot(colums[0],columns[1], df,color=color,scatter=True,scatter_kws={'alpha':.1})
 		plt.yticks(size=14)
 		plt.xticks([])
-		# plt.ylim(min(df['High Flexibility']),max(df['High Flexibility']))
-		# plt.ylim(-100,100)
 		plt.ylabel('Mean Activity at Connector Areas',size=24)
 		plt.xlabel("Cognitive Components Engaged",size=24)
 		sns.despine()
-		plt.show()
-		g = sns.regplot('Components Engaged','Low Flexibility', df,color='Blue',scatter_kws={'alpha':.1})
-		# plt.xlim(min(df['Components Engaged']),max(df['Components Engaged']))
-		# print min(df['Components Engaged'])
-		# print max(df['Components Engaged'])
-		# plt.ylim(min(df['Low Flexibility']),max(df['Low Flexibility']))
+	else:
+		g = sns.regplot(columns[0],columns[1],df,color=color,scatter_kws={'alpha':.1})
 		plt.ylim(-50,50)
 		plt.yticks(size=14)
-		# plt.yticks([])
 		plt.xticks([])
 		plt.ylabel('Mean Activity at Local Areas',size=24)
 		plt.xlabel("Cognitive Components Engaged",size=24)
 		sns.despine()
-		plt.show()
 
-def read_results(subjects=None,atlas='Shen',a_type='flex',corr_type='var',num_comps=12,ignore_flex=False,pc_thresh=8000,plot=False):
-	if subjects == None:
-		subjects = []
+def read_results_hcp(tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],colors=['Blue','Red','Yellow','Purple','Green','Orange','Black'],subjects=None,atlas='power',a_type='flex',corr_type='var',num_comps=12,ignore_flex=False,plot=True,print_corrs=False):
+	columns=['Task','Components Engaged','Connector Activity','Local Activity']
+	df = pd.DataFrame(columns = columns)
+	for task,color in zip(tasks,colors[:len(tasks)]):
 		if a_type == 'flex':
-			subject_files = glob.glob('/home/despoB/mb3152/dynamic_mod/component_activation/**_%s_data_%s_%s.npy' %(a_type,num_comps,ignore_flex))
-			for subject_file in subject_files:
-				subjects.append(subject_file.split('_')[2].split('/')[1])  		
+			subject_files = glob.glob('/home/despoB/mb3152/dynamic_mod/component_activation/**_flex_data_%s_%s_*%s*.npy' %(num_comps,ignore_flex,task))	
 		else:
-			subject_files = glob.glob('/home/despoB/mb3152/dynamic_mod/component_activation/0**_%s_data_%s_%s_%s.npy' %(a_type,num_comps,ignore_flex,pc_thresh))
-			for subject_file in subject_files:
-				subjects.append(subject_file.split('_')[2].split('/')[1])  	   
-	d = []
-	for i in subject_files:
-		d.append(list(np.load(i)))
-	# for subject in subjects:
-	# 	if a_type != 'flex':
-	# 		d = np.load('/home/despoB/mb3152/dynamic_mod/component_activation/%s_%s_data_%s_%s.npy' %(subject,a_type,num_comps,ignore_flex))    
-	# 	else:
-	# 		d = np.load('/home/despoB/mb3152/dynamic_mod/component_activation/%s_%s_data_%s_%s.npy' %(subject,a_type,num_comps,ignore_flex))  
-
-	# 	data.append(d)
-	data = np.array(d)
-	print 'High Flex'
-	for subject in range(len(subjects)):
-		if corr_type == 'var':
-			print pearsonr(data[subject,0,:],data[subject,2,:]),subjects[subject]
-		else:
-			print pearsonr(data[subject,1,:],data[subject,2,:]),subjects[subject]
-	print '______________________'
-	print 'Low Flex'
-	for subject in range(len(subjects)):
-		if corr_type == 'var':
-			print pearsonr(data[subject,0,:],data[subject,3,:]),subjects[subject]
-		else:
-			print pearsonr(data[subject,1,:],data[subject,3,:]),subjects[subject]
-	print '______________________'
-	print 'Difference'
-	for subject in range(len(subjects)):
-		if corr_type == 'var':
-			print pearsonr(data[subject,0,:],data[subject,2,:])[0] - pearsonr(data[subject,0,:],data[subject,3,:])[0], subjects[subject]
-		else:
-			print pearsonr(data[subject,1,:],data[subject,2,:])[0] - pearsonr(data[subject,1,:],data[subject,3,:])[0], subjects[subject]
-	print '______________________'
-	if corr_type == 'var':
-		print pearsonr(data[:,0,:].reshape(-1),data[:,2,:].reshape(-1))
-		print pearsonr(data[:,0,:].reshape(-1),data[:,3,:].reshape(-1))
-	else:
-		print pearsonr(data[:,1,:].reshape(-1),data[:,2,:].reshape(-1))
-		print pearsonr(data[:,1,:].reshape(-1),data[:,3,:].reshape(-1))
+			subject_files = glob.glob('/home/despoB/mb3152/dynamic_mod/component_activation/pc_data_**_%s_%s_*%s*.npy' %(num_comps,ignore_flex,task))
+		d = []
+		for i in subject_files:
+			sd = np.load(i)
+			for i in range(len(sd)):
+				d.append([task,sd[0][i],sd[2][i],sd[3][i]])
+		df = pd.concat([df, pd.DataFrame(d,columns = columns)], axis=0)
 	if plot == True:
-		df = pd.DataFrame(data=np.array([data[:,0,:].reshape(-1),data[:,2,:].reshape(-1),data[:,3,:].reshape(-1)]).transpose(),columns=['Components Engaged','High Flexibility','Low Flexibility'])
-		g = sns.regplot('Components Engaged','High Flexibility', df,color='Red',scatter=True,scatter_kws={'alpha':.05})
-		# plt.xlim(min(df['Components Engaged']),max(df['Components Engaged']))
-		# plt.yticks([])
-		plt.xticks([])
-		# plt.ylim(min(df['High Flexibility']),max(df['High Flexibility']))
-		plt.ylim(-100,100)
-		plt.ylabel('Mean Activity at Connector Areas')
-		plt.xlabel("Cognitive Components Engaged")
-		sns.despine()
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors)
+
+		g = g.map(plt.scatter,'Components Engaged','Connector Activity')
+
 		plt.show()
-		g = sns.regplot('Components Engaged','Low Flexibility', df,color='Blue',scatter_kws={'alpha':.05})
-		# plt.xlim(min(df['Components Engaged']),max(df['Components Engaged']))
-		# print min(df['Components Engaged'])
-		# print max(df['Components Engaged'])
-		# plt.ylim(min(df['Low Flexibility']),max(df['Low Flexibility']))
-		plt.ylim(-100,100)
-		# plt.yticks([])
-		plt.xticks([])
-		plt.ylabel('Mean Activity at Local Areas')
-		plt.xlabel("Cognitive Components Engaged")
-		sns.despine()
+
+		activity_mean = []
+		component_mean = []
+
+		for task in tasks:
+			activity_mean.append(np.mean(df['Connector Activity'][df.Task==task]))
+			component_mean.append(np.mean(df['Components Engaged'][df.Task==task]))
+
+		for ix,task in enumerate(tasks):
+			plt.scatter(y=np.array(activity_mean)[ix]+25,x=component_mean[ix],s=200,c=colors[ix],label=tasks[ix])
+			plt.legend()
 		plt.show()
 
 def make_partition(subjects,atlas,path):
