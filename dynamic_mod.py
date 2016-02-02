@@ -4,7 +4,6 @@ import pandas as pd
 import os
 import sys
 import scipy.io as sio
-from surfer import Brain
 from scipy.stats.stats import pearsonr
 from scipy.stats import ttest_ind
 import numpy as np
@@ -25,13 +24,12 @@ import glob
 import math
 from collections import Counter
 import matplotlib.pylab as plt
-# plt.rcParams['pdf.fonttype'] = 42
+plt.rcParams['pdf.fonttype'] = 42
 import seaborn as sns
 from scipy.stats.mstats import zscore as z_score
 from igraph import VertexClustering
 import powerlaw
-from richclub import preserve_strength, RC
-
+# from richclub import preserve_strength, RC
 #build graphs for timepoints when component is engaged.
 #build graphs for when no variance versus high variance, look at modularity and PC and WMD. Perhaps calculate 
 #modularity without PC nodes / See if most of the between module connections come from PC nodes.
@@ -39,6 +37,7 @@ from richclub import preserve_strength, RC
 hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
 hcp_resting_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
 hcp_subjects = os.listdir('/home/despoB/connectome-data/')
+hcp_subjects.sort()
 
 def nan_pearsonr(x,y):
 	x = np.array(x)
@@ -239,9 +238,14 @@ def flex_activity_hcp(subject,task,num_comps=12,ignore_flex=False,flex_thresh=3)
 	components_engaged_mean = []
 	flex_activity = []
 	non_flex_activity= []
-	component_engagement = run_component_estimation_hcp(subject=subject,num_comps=num_comps,ignore_flex=ignore_flex,task=task)
-	subject_path = hcp_subject_dir.replace('SUBJECT',str(subject))
+	if 'REST' in task:
+		subject_path = hcp_resting_dir.replace('SUBJECT',str(subject))
+		task = 'rfMRI_REST1_RL'	
+	else:
+		task = 'tfMRI_%s_RL' %(task)
+		subject_path = hcp_subject_dir.replace('SUBJECT',str(subject))
 	subject_path = subject_path.replace('TASK',task)
+	component_engagement = run_component_estimation_hcp(subject=subject,num_comps=num_comps,ignore_flex=ignore_flex,task=task)
 	epi_data = brain_graphs.load_subject_time_series(subject_path)
 	epi_data[np.std(epi_data,axis=3)==0.0] = np.nan
 	epi_data[mask<=0] = np.nan
@@ -261,47 +265,37 @@ def flex_activity_hcp(subject,task,num_comps=12,ignore_flex=False,flex_thresh=3)
 	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/%s_flex_data_%s_%s_%s.npy'%(subject,num_comps,ignore_flex,task), np.array([x,y,z,w]))
 
 def pc_activity_random(subject,task,num_comps=12,ignore_flex=False,subjects=hcp_subjects):
-	subjects = remove_missing_subjects(subjects,'REST','power')
-	static_results = graph_metrics(subjects,'REST','power')
-	parcel_path = '/home/despoB/mb3152/dynamic_mod/atlases/%s_template.nii' %('power')
+	subjects = remove_missing_subjects(hcp_subjects,'REST','power')
+	static_results = graph_metrics(subjects,'REST','power')	
+	flex = '/home/despoB/mb3152/modularity/YeoBrainmapMNI152/FSL/Flexibility/YeoMD_%scomp_FSL_MNI152_thresh1e-5.nii' %(num_comps)
+	flex = nib.load(flex).get_data().astype('float64')
 	mask = nib.load('/usr/local/fsl-5.0.1/data/atlases/HarvardOxford/HarvardOxford-cort-maxprob-thr25-2mm.nii.gz').get_data()
-	if 'REST' in task:
-		subject_path = hcp_resting_dir.replace('SUBJECT',str(subject))
-		task = 'rfMRI_REST1_RL'	
-	else:
-		task = 'tfMRI_%s_RL' %(task)
-		subject_path = hcp_subject_dir.replace('SUBJECT',str(subject))
-	subject_path = subject_path.replace('TASK',task)
-	epi_data = brain_graphs.load_subject_time_series(subject_path)
-	epi_data[np.std(epi_data,axis=3)==0.0] = np.nan
-	epi_data[mask<=0] = np.nan
+	components_engaged_var = []
+	high_pc_activity = []
+	low_pc_activity = []
+	parcel_path = '/home/despoB/mb3152/dynamic_mod/atlases/%s_template.nii' %('power')
 	pc = static_results['subject_pcs']
 	pc = np.nanmean(pc,axis=0)
 	template = np.array(nib.load(parcel_path).get_data())
-	components_engaged_var = []
-	components_engaged_mean = []
-	high_pc_activity = []
-	low_pc_activity = []
-	epi_data[np.std(epi_data,axis=3)==0.] = np.nan
-	component_engagement = run_component_estimation_hcp(subject=subject,num_comps=num_comps,ignore_flex=ignore_flex,task=task)
 	pc_array = np.zeros(template.shape)
 	pc_array[:,:,:,] = np.nan
 	for i in range(len(pc)):
 		pc_array[template==i+1] = pc[i]
 	pc_thresh = np.percentile(pc_array[np.isnan(pc_array)==False],75,interpolation='lower')
 	print pc_thresh
-	for i in range(epi_data.shape[-1]):
-		brain_data = epi_data[:,:,:,i].copy()
-		brain_data = brain_data.reshape(-1)
-		np.random.shuffle(brain_data)
-		brain_data = brain_data.reshape(91,109,91)
+	component_file = get_2d_volume_data('/home/despoB/mb3152/modularity/YeoBrainmapMNI152/FSL/Yeo_%sComp_PrActGivenComp_FSL_MNI152_2mm.nii.gz' %(num_comps))
+	for i in range(100000):
+		brain_data = np.random.randint(0,100,(91,109,91)).astype(float)
+		brain_data[template<=0] = 0.0
+		estimate_data = brain_data.copy()
+		estimate_data = np.reshape(estimate_data, (np.prod(estimate_data.shape),1))
+		engagement = estimate(estimate_data,component_file)
+		brain_data[template<=0] = np.nan
 		high_pc_activity.append(np.nanmean(brain_data[pc_array>=pc_thresh]))
 		low_pc_activity.append(np.nanmean(brain_data[pc_array<pc_thresh]))
-		engagement = component_engagement[i]
 		components_engaged_var.append(1-np.std(engagement))
-		components_engaged_mean.append(len(engagement[engagement>(1./float(num_comps))]))
-	print pearsonr(components_engaged_var,high_pc_activity)
-	print pearsonr(components_engaged_var,low_pc_activity)
+		print pearsonr(components_engaged_var,high_pc_activity)
+		print pearsonr(components_engaged_var,low_pc_activity)
 
 def pc_activity_hcp(subject,task,num_comps=12,ignore_flex=False,subjects=hcp_subjects):
 	subjects = remove_missing_subjects(subjects,'REST','power')
@@ -348,36 +342,8 @@ def pc_activity_hcp(subject,task,num_comps=12,ignore_flex=False,subjects=hcp_sub
 	w = low_pc_activity
 	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/pc_data_%s_%s_%s_%s.npy'%(subject,num_comps,ignore_flex,task), np.array([x,y,z,w]))
 
-def print_results(data):
-	print 'High Flex'
-	for subject in range(data.shape[0]):
-		if corr_type == 'var':
-			print pearsonr(data[subject,0,:],data[subject,2,:]),subjects[subject]
-		else:
-			print pearsonr(data[subject,1,:],data[subject,2,:]),subjects[subject]
-	print '______________________'
-	print 'Low Flex'
-	for subject in range(data.shape[0]):
-		if corr_type == 'var':
-			print pearsonr(data[subject,0,:],data[subject,3,:]),subjects[subject]
-		else:
-			print pearsonr(data[subject,1,:],data[subject,3,:]),subjects[subject]
-	print '______________________'
-	print 'Difference'
-	for subject in range(data.shape[0]):
-		if corr_type == 'var':
-			print pearsonr(data[subject,0,:],data[subject,2,:])[0] - pearsonr(data[subject,0,:],data[subject,3,:])[0], subjects[subject]
-		else:
-			print pearsonr(data[subject,1,:],data[subject,2,:])[0] - pearsonr(data[subject,1,:],data[subject,3,:])[0], subjects[subject]
-	print '______________________'
-	if corr_type == 'var':
-		print pearsonr(data[:,0,:].reshape(-1),data[:,2,:].reshape(-1))
-		print pearsonr(data[:,0,:].reshape(-1),data[:,3,:].reshape(-1))
-	else:
-		print pearsonr(data[:,1,:].reshape(-1),data[:,2,:].reshape(-1))
-		print pearsonr(data[:,1,:].reshape(-1),data[:,3,:].reshape(-1))
-
-def read_results_hcp(tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],colors=['Blue','Red','Yellow','Purple','Green','Orange','Black'],subjects=None,a_type='flex',num_comps=12,ignore_flex=False,plot=True):
+def read_results_hcp(a_type='flex',num_comps=12,ignore_flex=False,plot=True):
+	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	columns=['Task','Components Engaged','Connector Activity','Local Activity']
 	df = pd.DataFrame(columns = columns)
 	for task in tasks:
@@ -391,6 +357,13 @@ def read_results_hcp(tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','S
 			for i in range(len(sd[0])):
 				d.append([task,sd[0][i],sd[2][i],sd[3][i]])
 		df = pd.concat([df, pd.DataFrame(d,columns = columns)], axis=0)
+	if print_results == True:
+		print 'Connector Activity'
+		for task in tasks:
+			print pearsonr(df['Components Engaged'][df.Task==task],df['Connector Activity'][df.Task==task])
+		print 'Local Activity'
+		for task in tasks:
+			print pearsonr(df['Components Engaged'][df.Task==task],df['Local Activity'][df.Task==task])
 	if plot == True:
 		#local node activity
 		sns.set_style("white")
@@ -869,7 +842,7 @@ def individual_graph_analyes(variables):
 		wmd.append(np.array(graph.wmd))
 		mod.append(graph.community.modularity)
 		del graph
-	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0))
+	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0),subject)
 
 def run_price(project,subject,task,ignore_flex=3):
 	if project == 'hcp':
@@ -945,17 +918,19 @@ def individual_graph_analyes(variables):
 		wmd.append(np.array(graph.wmd))
 		mod.append(graph.community.modularity)
 		del graph
-	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0))
+	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0),subject)
 
 def graph_metrics(subjects,task,atlas):
 	"""
 	run graph metrics or load them
 	"""
 	variables = []
-	project = get_project(subjects)
+	project = 'hcp'
 	for subject in subjects:
 		variables.append([subject,atlas,task])
 	try:
+		# done_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_new.npy' %(project,task,atlas)) 
+		# assert (done_subjects == subjects).all() #make sure you are getting subjects / subjects order you wanted and ran last time.
 		subject_pcs = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pcs.npy' %(project,task,atlas))
 		subject_wmds = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmds.npy' %(project,task,atlas))
 		subject_mods = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_mods.npy'%(project,task,atlas))
@@ -970,13 +945,15 @@ def graph_metrics(subjects,task,atlas):
 		subject_pcs = []
 		subject_mods = []
 		subject_wmds = []
-		for r in results:
+		for r,s in zip(results,subjects):
 			subject_mods.append(np.nanmean(r[0]))
 			subject_pcs.append(r[1])
 			subject_wmds.append(r[2])
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pcs.npy' %(project,task,atlas),np.array(subject_pcs))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmds.npy' %(project,task,atlas),np.array(subject_wmds))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_mods.npy' %(project,task,atlas),np.array(subject_mods))
+			assert r[3] == s #make sure it returned the order of subjects/results correctly
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pcs_new.npy' %(project,task,atlas),np.array(subject_pcs))
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmds_new.npy' %(project,task,atlas),np.array(subject_wmds))
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_mods_new.npy' %(project,task,atlas),np.array(subject_mods))
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_new.npy' %(project,task,atlas),np.array(subjects))
 	matrices = []
 	thresh_matrices = []
 	for subject in subjects:
@@ -1391,35 +1368,24 @@ def main_analyes(task,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1.
 	plt.plot(degree_emperical_phis,color='r')
 	plt.show()
 
-def main_analyses_across_tasks(subjects=hcp_subjects):
-	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
+def connectivity_across_tasks(subjects=hcp_subjects):
+	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	project='hcp'
 	atlas='power'
 	gamma=1.0
 	omega=0.1
 	msc_cost = 0.1
 	window_size=100
-	# known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
-	# known_membership[known_membership==-1] = 0
-	# colors = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[34].values)
-	# network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
-	# num_nodes = len(known_membership)
-	# name_int_dict = {}
-	# color_int_dict = {}
-	subjects = np.array(hcp_subjects).copy()
-	subjects = list(subjects)
-	subjects = remove_missing_subjects(subjects,'REST',atlas,gamma,omega,msc_cost,window_size)
-	rest_static_results = graph_metrics(subjects,'REST',atlas)
-	rest_dynamic_results = dynamic_graph_metrics(subjects,'REST')
-
-	for name,color,int_value in zip(network_names,colors,known_membership):
-		name_int_dict[int_value] = name
-		color_int_dict[int_value] = color
-	node_pc_by_performance_avg = []
-	node_change_by_performance_avg = []
+	known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
+	known_membership[known_membership==-1] = 0
+	colors = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[34].values)
+	network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
+	num_nodes = len(known_membership)
+	name_int_dict = {}
+	color_int_dict = {}
+	columns=['PC','Change','Task','ChangexModularity','PCxModularity']
+	df = pd.DataFrame(columns = columns)
 	for task in tasks:
-		node_pc_by_performance = []
-		node_change_by_performance = []
 		subjects = np.array(hcp_subjects).copy()
 		subjects = list(subjects)
 		subjects = remove_missing_subjects(subjects,task,atlas,gamma,omega,msc_cost,window_size)
@@ -1430,20 +1396,174 @@ def main_analyses_across_tasks(subjects=hcp_subjects):
 		subject_mods = static_results['subject_mods']
 		subject_changes = dynamic_results['subject_changes']
 		task_perf = task_performance(subjects,task)
+		assert subject_pcs.shape[0] == len(subjects)
+		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
+		mean_change = np.nanmean(dynamic_results['subject_changes'],axis=0)
+		mod_change_corr = np.zeros(subject_pcs.shape[1])
+		for i in range(subject_pcs.shape[1]):
+			mod_change_corr[i] = nan_pearsonr(subject_mods,subject_changes[:,i])[0]
+		mod_pc_corr = np.zeros(subject_pcs.shape[1])
+		for i in range(subject_pcs.shape[1]):
+			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+		df_array = []
 		for node in range(264):
-			node_pc_by_performance.append(nan_pearsonr(subject_pcs[:,node],task_perf)[0])
-			node_change_by_performance.append(nan_pearsonr(subject_changes[:,node],task_perf)[0])
-		print task, str(pearsonr(np.nanmean(static_results['subject_pcs'],axis=0),node_pc_by_performance))
-		print task, str(pearsonr(np.nanmean(dynamic_results['subject_changes'],axis=0),node_change_by_performance))
-		node_pc_by_performance_avg.append(node_pc_by_performance)
-		node_change_by_performance_avg.append(node_change_by_performance)
-		# subject_pcs[np.isnan(subject_pcs)] = 0.0
-		# mod_change_corr = np.zeros(subject_pcs.shape[1])
-		# for i in range(subject_pcs.shape[1]):
-		# 	mod_change_corr[i] = pearsonr(subject_mods,subject_changes[:,i])[0]
-		# mod_pc_corr = np.zeros(subject_pcs.shape[1])
-		# for i in range(subject_pcs.shape[1]):
-		# 	mod_pc_corr[i] = pearsonr(subject_mods,subject_pcs[:,i])[0]
+			df_array.append([mean_pc[node],mean_change[node],task,mod_change_corr[node],mod_pc_corr[node]])
+		df = pd.concat([df,pd.DataFrame(df_array,columns=columns)],axis=0)	
+		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		pcs = np.nanmean(subject_pcs,axis=0)
+		write_df[3] = pcs
+		maxv = np.nanmean(pcs) + (np.nanstd(pcs)*2)
+		minv = np.nanmean(pcs) - (np.nanstd(pcs)*2)
+		write_df[3][pcs > maxv] = maxv
+		write_df[3][pcs < minv] = minv	
+		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task),sep='\t',index=False,names=False,header=False)
+		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		write_df[3] = mod_pc_corr
+		maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2)
+		minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2)
+		write_df[3][mod_pc_corr > maxv] = maxv
+		write_df[3][mod_pc_corr < minv] = minv
+		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)
+
+	for task in tasks:
+		print ' ' 
+		print task + ' Results'
+		print 'ChangexModularity, Change'
+		print nan_pearsonr(df.ChangexModularity[df.Task==task],df.Change[df.Task==task])
+		print 'PCxModularity, PC'
+		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
+	
+	sns.set_style("white")
+	sns.set_style("ticks")
+	with sns.plotting_context("paper",font_scale=2):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',size=(5))
+		g = g.map(sns.regplot,'PCxModularity','PC',scatter_kws={'alpha':.95})
+		plt.tight_layout()
+		plt.show()
+	# with sns.plotting_context("paper",font_scale=3):
+	# 	g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette='Paired')
+	# 	g = g.map(sns.regplot,'ChangexModularity','Change',scatter_kws={'alpha':.95})
+	# 	plt.tight_layout()
+	# 	plt.show()
+
+def performance_across_tasks(subjects=hcp_subjects):
+	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
+	project='hcp'
+	atlas='power'
+	gamma=1.0
+	omega=0.1
+	msc_cost = 0.1
+	window_size=100
+	known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
+	known_membership[known_membership==-1] = 0
+	colors = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[34].values)
+	network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
+	num_nodes = len(known_membership)
+	name_int_dict = {}
+	color_int_dict = {}
+	subjects = np.array(hcp_subjects).copy()
+	subjects = list(subjects)
+	subjects = remove_missing_subjects(subjects,'REST',atlas,gamma,omega,msc_cost,window_size)
+	rest_static_results = graph_metrics(subjects,'REST',atlas)
+	rest_dynamic_results = dynamic_graph_metrics(subjects,'REST')
+	for name,color,int_value in zip(network_names,colors,known_membership):
+		name_int_dict[int_value] = name
+		color_int_dict[int_value] = color
+	columns=['PC','Change','Task','PCxPerformance','ChangexPerformance','Random_PCxPerformance','Random_ChangexPerformance','Mod_Change_Corr','PCxModularity']
+	df = pd.DataFrame(columns = columns)
+	# mod_array.append(rest_static_results['subject_mods'])
+	# mod_change_corr = np.zeros(subject_pcs.shape[1])
+	# for i in range(subject_pcs.shape[1]):
+	# 	mod_change_corr[i] = nan_pearsonr(rest_static_results['subject_mods'],rest_dynamic_results['subject_changes'][:,i])[0]
+	# mod_pc_corr = np.zeros(subject_pcs.shape[1])
+	# for i in range(subject_pcs.shape[1]):
+	# 	mod_pc_corr[i] = nan_pearsonr(rest_static_results['subject_mods'],rest_static_results['subject_pcs'][:,i])[0]
+	# mod_change_corr_array.append(mod_change_corr)
+	# mod_pc_corr_array.append(mod_pc_corr)
+	for task in tasks:
+		subjects = np.array(hcp_subjects).copy()
+		subjects = list(subjects)
+		subjects = remove_missing_subjects(subjects,task,atlas,gamma,omega,msc_cost,window_size)
+		static_results = graph_metrics(subjects,task,atlas)
+		dynamic_results = dynamic_graph_metrics(subjects,task)
+		subject_pcs = static_results['subject_pcs']
+		thresh_matrices = static_results['thresh_matrices']
+		subject_mods = static_results['subject_mods']
+		mod_array.append(subject_mods)
+		subject_changes = dynamic_results['subject_changes']
+		task_perf = task_performance(subjects,task)
+		assert subject_pcs.shape[0] == len(subjects)
+		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
+		mean_change = np.nanmean(dynamic_results['subject_changes'],axis=0)
+		df_array = []
+		mod_change_corr = np.zeros(subject_pcs.shape[1])
+		for i in range(subject_pcs.shape[1]):
+			mod_change_corr[i] = nan_pearsonr(subject_mods,subject_changes[:,i])[0]
+		mod_pc_corr = np.zeros(subject_pcs.shape[1])
+		for i in range(subject_pcs.shape[1]):
+			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+		for node in range(264):
+			r_pc = []
+			r_ms = []
+			random_task_perf = task_perf.copy()
+			for i in range(100):
+				np.random.shuffle(random_task_perf)
+				r_pc.append(nan_pearsonr(subject_pcs[:,node],random_task_perf)[0])
+				r_ms.append(nan_pearsonr(subject_changes[:,node],random_task_perf)[0])
+			df_array.append([mean_pc[node],mean_change[node],task,nan_pearsonr(subject_pcs[:,node],task_perf)[0],nan_pearsonr(subject_changes[:,node],task_perf)[0],np.mean(r_pc),np.mean(r_ms),mod_change_corr[node],mod_pc_corr[node]])
+		df = pd.concat([df,pd.DataFrame(df_array,columns=columns)],axis=0)
+		# print 'Mean PC by Modularity'
+		# print pearsonr(subject_mods,np.nanmean(subject_pcs,axis=1))
+		# print 'Random'
+		# print pearsonr(df.Random_PCxPerformance[df.Task==task],df.PC[df.Task==task])
+		# print pearsonr(df.Random_ChangexPerformance[df.Task==task],df.Change[df.Task==task])	
+	for task in tasks:
+		print ' ' 
+		print task + ' Results'
+		print 'PCxPerformance, PC'
+		print nan_pearsonr(df.PCxPerformance[df.Task==task],df.PC[df.Task==task])
+		print 'ChangexPerformance, Change'
+		print nan_pearsonr(df.ChangexPerformance[df.Task==task],df.Change[df.Task==task])
+		print 'PCxModularity, PC'
+		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
+		print 'PCxModularity, PCxPerformance'
+		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PCxPerformance[df.Task==task])
+	
+	sns.set_style("white")
+	sns.set_style("ticks")
+	colors = np.array(sns.palettes.color_palette('Paired',7))
+	with sns.plotting_context("paper",font_scale=3):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]])
+		g = g.map(sns.regplot,'PC','PCxPerformance',scatter_kws={'alpha':.95})
+		plt.tight_layout()
+		plt.show()
+	with sns.plotting_context("paper",font_scale=3):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]])
+		g = g.map(sns.regplot,'PCxModularity','PC',scatter_kws={'alpha':.95})
+		plt.tight_layout()
+		plt.show()
+	with sns.plotting_context("paper",font_scale=3):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]])
+		g = g.map(sns.regplot,'PCxModularity','PCxPerformance',scatter_kws={'alpha':.95})
+		plt.tight_layout()
+		plt.show()
+
+
+	# print 'PC x PC_Mod Correlation'
+	# for i,t in enumerate(tasks):
+	# 	print t, nan_pearsonr(mod_pc_corr_array[i],df.PC[df.Task==t])
+
+	# print 'PCxMod and PCxPerformance'
+	# for i,t in enumerate(tasks):
+	# 	print t, nan_pearsonr(mod_pc_corr_array[i],df.PCxPerformance[df.Task==t])
+	
+	# print 'Change x Change_Mod Correlation'
+	# for i,t in enumerate(tasks):
+	# 	print t, nan_pearsonr(mod_change_corr_array[i],df.Change[df.Task==t])
+	# mod_pc_corr.append()
+	# mod_pc_corr_df = pd.DataFrame(np.array(mod_pc_corr_array).transpose(),columns=[Task,])
+	# mod_change_corr_df = pd.DataFrame(np.array(mod_change_corr_array).transpose(),columns=tasks)
+
 	"""
 	Make a matrix of each node's PC correlation to all edges in the graph.
 	"""
@@ -1463,7 +1583,6 @@ def main_analyses_across_tasks(subjects=hcp_subjects):
 		network_pc_edge_corr[n2,n1] = np.nanmean(low_pc_edge_matrix[np.ix_(n1_nodes,n2_nodes)])
 	sns.heatmap(network_pc_edge_corr,square=True,yticklabels=name_int_dict.values(),xticklabels=name_int_dict.values())
 	np.save(network_pc_edge_corr)
-
 
 """
 SGE Inputs
@@ -1489,12 +1608,21 @@ if len(sys.argv) > 1:
 	if sys.argv[1] == 'flex_activity_hcp':
 		subject = sys.argv[2]
 		task = sys.argv[3]
-		flex_activity_hcp(subject=subject,task=task,ignore_flex=False)
+		flex_activity_hcp(subject=subject,task=task,ignore_flex=3)
 	if sys.argv[1] == 'forever':
 		a = 0
 		while True:
 			a = a - 1
 			a = a + 1
+	if sys.argv[1] == 'graph_metrics':
+		project='hcp'
+		atlas='power'
+		gamma=1.0
+		omega=0.1
+		msc_cost = 0.1
+		window_size=100
+		subjects = remove_missing_subjects(list(np.array(hcp_subjects).copy()),sys.argv[2],atlas,gamma,omega,msc_cost,window_size)
+		graph_metrics(subjects,task=sys.argv[2],atlas='power')
 
 """
 Methods
