@@ -29,7 +29,9 @@ import seaborn as sns
 from scipy.stats.mstats import zscore as z_score
 from igraph import VertexClustering
 import powerlaw
-# from richclub import preserve_strength, RC
+from richclub import preserve_strength, RC
+from sklearn import linear_model
+import time
 #build graphs for timepoints when component is engaged.
 #build graphs for when no variance versus high variance, look at modularity and PC and WMD. Perhaps calculate 
 #modularity without PC nodes / See if most of the between module connections come from PC nodes.
@@ -1355,17 +1357,21 @@ def main_analyes(task,subjects=hcp_subjects,project='hcp',atlas='power',gamma=1.
 	graph = brain_graphs.matrix_to_igraph(np.nanmean(static_results['matrices'],axis=0),cost=cost)
 	degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
 	average_randomized_phis = np.mean([RC(preserve_strength(graph),scores=graph.strength(weights='weight')).phis() for i in range(500)])
-	degree_normalized_phis = degree_empirical_phis/average_randomized_phis
+	degree_normalized_phis = degree_emperical_phis/average_randomized_phis
 	graph = brain_graphs.matrix_to_igraph(np.nanmean(static_results['matrices'],axis=0),cost=cost)
 	pc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight')).pc
 	pc[np.isnan(pc)] = 0.0
 	pc_emperical_phis = RC(graph, scores=pc).phis()
 	pc_average_randomized_phis = np.mean([RC(preserve_strength(graph),scores=pc).phis() for i in range(500)])
 	pc_normalized_phis = pc_emperical_phis/pc_average_randomized_phis
-	plt.plot(pc_normalized_phis,color='b',linestyle='-')
-	plt.plot(degree_normalized_phis,color='r',linestyle='-')
-	plt.plot(pc_emperical_phis,color='b')
-	plt.plot(degree_emperical_phis,color='r')
+	plt.plot(pc_normalized_phis,color='b',linestyle='-',label='PC')
+	plt.plot(degree_normalized_phis,color='r',linestyle='-',label='Degree')
+	# plt.plot(pc_emperical_phis,color='b')
+	# plt.plot(degree_emperical_phis,color='r')
+	plt.legend()
+	plt.ylabel('Normalized Rich Club Coefficient')
+	plt.xlabel('PC/Degree Rank')
+	plt.show()
 	plt.show()
 
 def connectivity_across_tasks(subjects=hcp_subjects):
@@ -1386,6 +1392,7 @@ def connectivity_across_tasks(subjects=hcp_subjects):
 	columns=['PC','Change','Task','ChangexModularity','PCxModularity']
 	df = pd.DataFrame(columns = columns)
 	for task in tasks:
+		print task
 		subjects = np.array(hcp_subjects).copy()
 		subjects = list(subjects)
 		subjects = remove_missing_subjects(subjects,task,atlas,gamma,omega,msc_cost,window_size)
@@ -1412,15 +1419,15 @@ def connectivity_across_tasks(subjects=hcp_subjects):
 		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
 		pcs = np.nanmean(subject_pcs,axis=0)
 		write_df[3] = pcs
-		maxv = np.nanmean(pcs) + (np.nanstd(pcs)*2)
-		minv = np.nanmean(pcs) - (np.nanstd(pcs)*2)
+		maxv = np.nanmean(pcs) + (np.nanstd(pcs)*2.5)
+		minv = np.nanmean(pcs) - (np.nanstd(pcs)*2.5)
 		write_df[3][pcs > maxv] = maxv
 		write_df[3][pcs < minv] = minv	
 		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task),sep='\t',index=False,names=False,header=False)
 		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
 		write_df[3] = mod_pc_corr
-		maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2)
-		minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2)
+		maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2.5)
+		minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2.5)
 		write_df[3][mod_pc_corr > maxv] = maxv
 		write_df[3][mod_pc_corr < minv] = minv
 		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)
@@ -1428,15 +1435,15 @@ def connectivity_across_tasks(subjects=hcp_subjects):
 	for task in tasks:
 		print ' ' 
 		print task + ' Results'
-		print 'ChangexModularity, Change'
-		print nan_pearsonr(df.ChangexModularity[df.Task==task],df.Change[df.Task==task])
+		# print 'ChangexModularity, Change'
+		# print nan_pearsonr(df.ChangexModularity[df.Task==task],df.Change[df.Task==task])
 		print 'PCxModularity, PC'
 		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
 	
 	sns.set_style("white")
 	sns.set_style("ticks")
 	with sns.plotting_context("paper",font_scale=2):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',size=(5))
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',size=(6))
 		g = g.map(sns.regplot,'PCxModularity','PC',scatter_kws={'alpha':.95})
 		plt.tight_layout()
 		plt.show()
@@ -1480,7 +1487,10 @@ def performance_across_tasks(subjects=hcp_subjects):
 	# 	mod_pc_corr[i] = nan_pearsonr(rest_static_results['subject_mods'],rest_static_results['subject_pcs'][:,i])[0]
 	# mod_change_corr_array.append(mod_change_corr)
 	# mod_pc_corr_array.append(mod_pc_corr)
+	local_coefficients = []
+	connector_coefficients = []
 	for task in tasks:
+		print task
 		subjects = np.array(hcp_subjects).copy()
 		subjects = list(subjects)
 		subjects = remove_missing_subjects(subjects,task,atlas,gamma,omega,msc_cost,window_size)
@@ -1489,7 +1499,7 @@ def performance_across_tasks(subjects=hcp_subjects):
 		subject_pcs = static_results['subject_pcs']
 		thresh_matrices = static_results['thresh_matrices']
 		subject_mods = static_results['subject_mods']
-		mod_array.append(subject_mods)
+		# mod_array.append(subject_mods)
 		subject_changes = dynamic_results['subject_changes']
 		task_perf = task_performance(subjects,task)
 		assert subject_pcs.shape[0] == len(subjects)
@@ -1512,6 +1522,87 @@ def performance_across_tasks(subjects=hcp_subjects):
 				r_ms.append(nan_pearsonr(subject_changes[:,node],random_task_perf)[0])
 			df_array.append([mean_pc[node],mean_change[node],task,nan_pearsonr(subject_pcs[:,node],task_perf)[0],nan_pearsonr(subject_changes[:,node],task_perf)[0],np.mean(r_pc),np.mean(r_ms),mod_change_corr[node],mod_pc_corr[node]])
 		df = pd.concat([df,pd.DataFrame(df_array,columns=columns)],axis=0)
+		"""
+		predict performance using high and low PCS values. 
+		"""
+		pc_thresh = 75
+		local_thresh = 25
+		pc_thresh = np.percentile(np.nanmean(subject_pcs,axis=0),pc_thresh)
+		local_thresh = np.percentile(np.nanmean(subject_pcs,axis=0),local_thresh)
+		connector_nodes = np.where(np.nanmean(subject_pcs,axis=0)>=pc_thresh)[0]
+		local_nodes = np.where(np.nanmean(subject_pcs,axis=0)<local_thresh)[0]
+		subject_pcs[np.isnan(subject_pcs)] = 0.0
+		keep = np.isnan(task_perf) == False
+
+
+		clf = linear_model.BayesianRidge()
+		clf.fit(subject_pcs[keep][:-100,local_nodes],task_perf[keep][:-100])
+		result  = pearsonr(clf.predict(subject_pcs[keep][:-100,local_nodes]),task_perf[keep][:-100])
+		print 'local nodes prediction: ' +  'r=' + str(result[0]) + ' , p=' + str(result[1])
+		local_coefs = clf.coef_.copy()
+		print 'mean local coefficient: ', np.mean(clf.coef_)
+		prediction = clf.predict(subject_pcs[keep][:-100,local_nodes])
+		test = task_perf[keep][:-100]
+		sns.set_style("white")
+		sns.set_style("ticks")
+		with sns.plotting_context("paper",font_scale=1):
+			sns.regplot(prediction,test,color=sns.color_palette("coolwarm",7)[0],label='Local Nodes')
+			plt.ylabel('Real Performance')
+			plt.xlabel('Predicted Performance')
+			plt.title('Local Nodes PC Prediction in %s Task'%(task.lower()))
+			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_local_prediction.jpeg'%(task),dpi=900)
+			time.sleep(1)
+			plt.close()
+		clf = linear_model.BayesianRidge()
+		clf.fit(subject_pcs[keep][:-100,connector_nodes],task_perf[keep][:-100])
+		result = pearsonr(clf.predict(subject_pcs[keep][:-100,connector_nodes]),task_perf[keep][:-100])
+		prediction = clf.predict(subject_pcs[keep][:-100,connector_nodes])
+		test = task_perf[keep][:-100]
+		sns.set_style("white")
+		sns.set_style("ticks")
+		with sns.plotting_context("paper",font_scale=1):
+			sns.regplot(prediction,test,color=sns.color_palette("coolwarm", 7)[-1],label='Connector Nodes')
+			plt.ylabel('Real Performance')
+			plt.xlabel('Predicted Performance')
+			plt.title('Connector Nodes PC Prediction in %s Task'%(task.lower()))
+			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_connector_prediction.jpeg'%(task),dpi=900)
+			time.sleep(1)
+			plt.close()
+		print 'connector nodes prediction: '+'r=' + str(result[0]) + ' , p=' + str(result[1])
+		connector_coefs = clf.coef_.copy()
+		print 'mean connector coefficient: ', np.mean(clf.coef_)
+		result = scipy.stats.ttest_ind(connector_coefs,local_coefs)
+
+		print 'difference in coefficients: ' +'t=' + str(result[0]) + ' , p=' + str(result[1])
+		local_coefficients.append(local_coefs)
+		connector_coefficients.append(connector_coefs)
+	local_coefficients = np.array(local_coefficients).reshape(-1)
+	connector_coefficients = np.array(connector_coefficients).reshape(-1)
+	result = scipy.stats.ttest_ind(np.array(connector_coefficients).reshape(-1),np.array(local_coefficients).reshape(-1))
+	print 'average difference in coefficients: ' +'t=' + str(result[0]) + ' , p=' + str(result[1])
+	coeff_df = []
+	for c in connector_coefficients:
+		coeff_df.append([c,'Connector Coefficient',' '])
+		# coeff_df.append([c,'Connector Coefficient','two'])
+	for l in local_coefficients:
+		coeff_df.append([l,'Local Coefficient',' '])
+		# coeff_df.append([l,'Local Coefficient','two'])
+	coeff_df = pd.DataFrame(coeff_df,columns=['Coefficient','Coefficient Type',' '])
+	sns.set_style("whitegrid")
+	# sns.set_style("ticks")
+	with sns.plotting_context('poster',font_scale=2):
+		sns.violinplot(color = 'black',y='Coefficient',linewidth=3,x=' ',data=coeff_df,hue='Coefficient Type',split=True,inner="quartile",palette={'Local Coefficient':sns.color_palette("coolwarm", 7)[0],'Connector Coefficient':sns.color_palette("coolwarm", 7)[-1]})
+		plt.show()
+
+
+
+		# clf = linear_model.LinearRegression()
+		# clf.fit(subject_pcs[keep][:-100],task_perf[keep][:-100])
+		# print 'all nodes prediction: ', pearsonr(clf.predict(subject_pcs[keep][:-100]),task_perf[keep][:-100])
+		# print 'difference in coefficients: ', scipy.stats.ttest_ind(clf.coef_[connector_nodes],clf.coef_[local_nodes])
+
+
+
 		# print 'Mean PC by Modularity'
 		# print pearsonr(subject_mods,np.nanmean(subject_pcs,axis=1))
 		# print 'Random'
@@ -1528,22 +1619,31 @@ def performance_across_tasks(subjects=hcp_subjects):
 		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
 		print 'PCxModularity, PCxPerformance'
 		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PCxPerformance[df.Task==task])
+		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		perf_pc_corr = df.PCxPerformance[df.Task==task]
+		write_df[3] = perf_pc_corr
+		# maxv = np.nanmean(perf_pc_corr) + (np.nanstd(perf_pc_corr)*2.5)
+		# minv = np.nanmean(perf_pc_corr) - (np.nanstd(perf_pc_corr)*2.5)
+		# write_df[3][mod_pc_corr > maxv] = maxv
+		# write_df[3][mod_pc_corr < minv] = minv
+		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_perf_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)
 	
+
 	sns.set_style("white")
 	sns.set_style("ticks")
 	colors = np.array(sns.palettes.color_palette('Paired',7))
-	with sns.plotting_context("paper",font_scale=3):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]])
+	with sns.plotting_context("paper",font_scale=2):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],size=(6))
 		g = g.map(sns.regplot,'PC','PCxPerformance',scatter_kws={'alpha':.95})
 		plt.tight_layout()
 		plt.show()
 	with sns.plotting_context("paper",font_scale=3):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]])
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],size=(5))
 		g = g.map(sns.regplot,'PCxModularity','PC',scatter_kws={'alpha':.95})
 		plt.tight_layout()
 		plt.show()
-	with sns.plotting_context("paper",font_scale=3):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]])
+	with sns.plotting_context("paper",font_scale=2):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],size=(6))
 		g = g.map(sns.regplot,'PCxModularity','PCxPerformance',scatter_kws={'alpha':.95})
 		plt.tight_layout()
 		plt.show()
