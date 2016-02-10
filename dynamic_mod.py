@@ -17,7 +17,7 @@ import random
 from scipy.io import loadmat
 import nibabel as nib
 from sklearn.metrics.cluster import normalized_mutual_info_score
-from itertools import combinations
+from itertools import combinations, permutations
 from igraph import Graph, ADJ_UNDIRECTED
 from scipy.stats import ttest_ind
 import glob
@@ -30,7 +30,7 @@ from scipy.stats.mstats import zscore as z_score
 from igraph import VertexClustering
 import powerlaw
 from richclub import preserve_strength, RC
-from sklearn import linear_model
+from sklearn import linear_model, cross_validation
 import time
 #build graphs for timepoints when component is engaged.
 #build graphs for when no variance versus high variance, look at modularity and PC and WMD. Perhaps calculate 
@@ -342,9 +342,9 @@ def pc_activity_hcp(subject,task,num_comps=12,ignore_flex=False,subjects=hcp_sub
 	y = components_engaged_mean
 	z = high_pc_activity
 	w = low_pc_activity
-	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/pc_data_%s_%s_%s_%s.npy'%(subject,num_comps,ignore_flex,task), np.array([x,y,z,w]))
+	np.save('/home/despoB/mb3152/dynamic_mod/component_activation/pc_data_%s_%s_%s_%s_bytask.npy'%(subject,num_comps,ignore_flex,task), np.array([x,y,z,w]))
 
-def read_results_hcp(a_type='flex',num_comps=12,ignore_flex=False,plot=True):
+def read_results_hcp(a_type='pc',num_comps=12,ignore_flex=False,plot=True,print_results = True):
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	columns=['Task','Components Engaged','Connector Activity','Local Activity']
 	df = pd.DataFrame(columns = columns)
@@ -1427,51 +1427,50 @@ def connectivity_across_tasks(subjects=hcp_subjects):
 		df_array = []
 		for node in range(264):
 			df_array.append([mean_pc[node],mean_change[node],task,mod_change_corr[node],mod_pc_corr[node]])
-		1/0
-		df = pd.concat([df,pd.DataFrame(df_array,columns=columns)],axis=0)	
-		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-		pcs = np.nanmean(subject_pcs,axis=0)
-		write_df[3] = pcs
-		maxv = np.nanmean(pcs) + (np.nanstd(pcs)*2.5)
-		minv = np.nanmean(pcs) - (np.nanstd(pcs)*2.5)
-		write_df[3][pcs > maxv] = maxv
-		write_df[3][pcs < minv] = minv	
-		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task),sep='\t',index=False,names=False,header=False)
-		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-		write_df[3] = mod_pc_corr
-		maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2.5)
-		minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2.5)
-		write_df[3][mod_pc_corr > maxv] = maxv
-		write_df[3][mod_pc_corr < minv] = minv
-		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)
+		"""
+		write values for viz
+		"""
+		# df = pd.concat([df,pd.DataFrame(df_array,columns=columns)],axis=0)	
+		# write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		# pcs = np.nanmean(subject_pcs,axis=0)
+		# write_df[3] = pcs
+		# maxv = np.nanmean(pcs) + (np.nanstd(pcs)*2.5)
+		# minv = np.nanmean(pcs) - (np.nanstd(pcs)*2.5)
+		# write_df[3][pcs > maxv] = maxv
+		# write_df[3][pcs < minv] = minv	
+		# write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task),sep='\t',index=False,names=False,header=False)
+		# write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		# write_df[3] = mod_pc_corr
+		# maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2.5)
+		# minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2.5)
+		# write_df[3][mod_pc_corr > maxv] = maxv
+		# write_df[3][mod_pc_corr < minv] = minv
+		# write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)
 
 		#make brains to show the type of analysis we are doing.
-		while True:
-			figure_subjects = np.random.randint(0,450,5)
-			if (np.argsort(subject_pcs[[figure_subjects],258]) == np.argsort(subject_mods[[figure_subjects]])).all():
-				break
-		for subject in figure_subjects:
-			write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-			write_df[3] = np.nanmean(subject_pcs,axis=0)
-			write_df[4] = 3
-			write_df[4][258] = 5
-			write_df[3] = known_membership
-			write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.node'%(subject),sep='\t',index=False,names=False,header=False)
-			write_matrix = thresh_matrices[subject].copy()
-			for i,j in combinations(range(264),2):
-				if i != 258:
-					if j != 258:
-						write_matrix[i,j] = 0.0
-						write_matrix[j,i] = 0.0
-			matrix_df = pd.DataFrame(write_matrix)
-			matrix_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.edge'%(subject),sep='\t',index=False,names=False,header=False)
+		# while True:
+		# 	figure_subjects = np.random.randint(0,450,5)
+		# 	if (np.argsort(subject_pcs[[figure_subjects],258]) == np.argsort(subject_mods[[figure_subjects]])).all():
+		# 		break
+		# for subject in figure_subjects:
+		# 	write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		# 	write_df[3] = np.nanmean(subject_pcs,axis=0)
+		# 	write_df[4] = 3
+		# 	write_df[4][258] = 5
+		# 	write_df[3] = known_membership
+		# 	write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.node'%(subject),sep='\t',index=False,names=False,header=False)
+		# 	write_matrix = thresh_matrices[subject].copy()
+		# 	for i,j in combinations(range(264),2):
+		# 		if i != 258:
+		# 			if j != 258:
+		# 				write_matrix[i,j] = 0.0
+		# 				write_matrix[j,i] = 0.0
+		# 	matrix_df = pd.DataFrame(write_matrix)
+		# 	matrix_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.edge'%(subject),sep='\t',index=False,names=False,header=False)
 
 	for task in tasks:
 		print ' ' 
-		print task + ' Results'
-		# print 'ChangexModularity, Change'
-		# print nan_pearsonr(df.ChangexModularity[df.Task==task],df.Change[df.Task==task])
-		print 'PCxModularity, PC'
+		print task, 'PCxModularity, PC'
 		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
 	
 	sns.set_style("white")
@@ -1500,6 +1499,7 @@ def connectivity_across_tasks(subjects=hcp_subjects):
 	known_membership[known_membership==-1] = 0
 	colors = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[34].values)
 	network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
+	pc_edge_corrs = [] # store all to look at differnces. 
 	for task in tasks:
 		pc_thresh = 75
 		subjects = np.array(hcp_subjects).copy()
@@ -1512,37 +1512,49 @@ def connectivity_across_tasks(subjects=hcp_subjects):
 		pc_thresh = np.percentile(np.nanmean(subject_pcs,axis=0),pc_thresh)
 		connector_nodes = np.where(np.nanmean(subject_pcs,axis=0)>=pc_thresh)[0]
 		non_connector_nodes = np.where(np.nanmean(subject_pcs,axis=0)<pc_thresh)[0]
-		high_pc_edge_matrix = np.nanmean(pc_edge_corr[connector_nodes],axis=0)	
-		high_pc_edge_matrix = plot_corr_matrix(high_pc_edge_matrix,network_names.copy(),'/home/despoB/mb3152/dynamic_mod/figures/%s_pc_edge_corr_full_matrix.pdf'%(task),return_array=True)
-		network_high_pc_edge_corr = np.zeros((264,264))
-		network_avg_high_pc_edge_corr = np.zeros((14,14))
-		for n1,n2 in combinations(range(14),2):
-			n1_nodes = np.where(known_membership==n1)[0].reshape(-1)
-			n2_nodes = np.where(known_membership==n2)[0].reshape(-1)
-			result = np.nanmean(high_pc_edge_matrix[np.ix_(n1_nodes,n2_nodes)])
-			network_high_pc_edge_corr[np.ix_(n1_nodes,n2_nodes)] = result 
-			network_high_pc_edge_corr[np.ix_(n2_nodes,n1_nodes)] = result
-			network_avg_high_pc_edge_corr[n1,n2] = result
-			network_avg_high_pc_edge_corr[n2,n1] = result
-		for n1,n2 in zip(range(14),range(14)):
-			n1_nodes = np.where(known_membership==n1)[0].reshape(-1)
-			n2_nodes = np.where(known_membership==n2)[0].reshape(-1)
-			result = np.nanmean(high_pc_edge_matrix[np.ix_(n1_nodes,n2_nodes)])
-			network_high_pc_edge_corr[np.ix_(n1_nodes,n2_nodes)] = result
-			network_high_pc_edge_corr[np.ix_(n2_nodes,n1_nodes)] = result
-			network_avg_high_pc_edge_corr[n1,n2] = result
-			network_avg_high_pc_edge_corr[n2,n1] = result
-		sns.heatmap(network_avg_high_pc_edge_corr,square=True,yticklabels=name_int_dict.values(),xticklabels=name_int_dict.values())
-		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_pc_edge_corr_network_matrix.pdf'%(task),dpi=1200)
-		# plt.show()
+		high_pc_edge_matrix = np.nanmean(pc_edge_corr[connector_nodes],axis=0)
+		# high_pc_edge_matrix = plot_corr_matrix(high_pc_edge_matrix,network_names.copy(),'/home/despoB/mb3152/dynamic_mod/figures/%s_pc_edge_corr_full_matrix.pdf'%(task),return_array=True)
+		high_pc_edge_matrix = plot_corr_matrix(high_pc_edge_matrix,network_names.copy(),out_file=None,return_array=True)
+		pc_edge_corrs.append(high_pc_edge_matrix.copy())
+		#make an average at two resolutions
+		# network_high_pc_edge_corr = np.zeros((264,264))
+		# network_avg_high_pc_edge_corr = np.zeros((14,14))
+		# for n1,n2 in combinations(range(14),2):
+		# 	n1_nodes = np.where(known_membership==n1)[0].reshape(-1)
+		# 	n2_nodes = np.where(known_membership==n2)[0].reshape(-1)
+		# 	result = np.nanmean(high_pc_edge_matrix[np.ix_(n1_nodes,n2_nodes)])
+		# 	network_high_pc_edge_corr[np.ix_(n1_nodes,n2_nodes)] = result 
+		# 	network_high_pc_edge_corr[np.ix_(n2_nodes,n1_nodes)] = result
+		# 	network_avg_high_pc_edge_corr[n1,n2] = result
+		# 	network_avg_high_pc_edge_corr[n2,n1] = result
+		# for n1,n2 in zip(range(14),range(14)):
+		# 	n1_nodes = np.where(known_membership==n1)[0].reshape(-1)
+		# 	n2_nodes = np.where(known_membership==n2)[0].reshape(-1)
+		# 	result = np.nanmean(high_pc_edge_matrix[np.ix_(n1_nodes,n2_nodes)])
+		# 	network_high_pc_edge_corr[np.ix_(n1_nodes,n2_nodes)] = result
+		# 	network_high_pc_edge_corr[np.ix_(n2_nodes,n1_nodes)] = result
+		# 	network_avg_high_pc_edge_corr[n1,n2] = result
+		# 	network_avg_high_pc_edge_corr[n2,n1] = result
+		# sns.heatmap(network_avg_high_pc_edge_corr,square=True,yticklabels=name_int_dict.values(),xticklabels=name_int_dict.values())
+		# plt.tight_layout()
+		# plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_pc_edge_corr_network_matrix.pdf'%(task),dpi=1200)
+	pc_edge_corrs = np.array(pc_edge_corrs)
+	network_names.sort()
+	for t,i in zip(tasks,range(len(tasks))):
+		idx_array = [0,1,2,3,4,5,6]
+		idx_array.remove(i)
+		plot_corr_matrix(np.diff([np.nanmean(pc_edge_corrs[idx_array],axis=0),pc_edge_corrs[i]],axis=0).reshape(264,264),network_names,
+			out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_pc_edge_corr_full_diff_matrix.pdf'%(t),return_array=False)
 	"""
 	specificity of modulation by nodes' pc?
 	check to see if correlation is only there for connector nodes
 	also, do absolute valies of the correaltion! 
 	is it stronger during task than rest?
 	"""
+	known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
+	known_membership[known_membership==-1] = 0
 	for task in tasks:
+		pc_thresh = 75
 		subjects = np.array(hcp_subjects).copy()
 		subjects = list(subjects)
 		subjects = remove_missing_subjects(subjects,task,atlas,gamma,omega,msc_cost,window_size)
@@ -1550,19 +1562,37 @@ def connectivity_across_tasks(subjects=hcp_subjects):
 		subject_pcs = static_results['subject_pcs']
 		thresh_matrices = static_results['thresh_matrices']
 		pc_edge_corr = pc_edge_correlation(subject_pcs,thresh_matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr.npy' %(project,task,atlas))
+		pc_thresh = np.percentile(np.nanmean(subject_pcs,axis=0),pc_thresh)
+		connector_nodes = np.where(np.nanmean(subject_pcs,axis=0)>=pc_thresh)[0]
 		#sum of weight changes for each node, by each node.
+		num_nodes = 264
 		weight_change_matrix = np.zeros((num_nodes,num_nodes))
+		weight_change_matrix_between = np.zeros((num_nodes,num_nodes))
+		weight_change_matrix_within = np.zeros((num_nodes,num_nodes))
 		weight_change_matrix_pos = np.zeros((num_nodes,num_nodes))
 		weight_change_matrix_neg = np.zeros((num_nodes,num_nodes))
 		for n1 in range(num_nodes):
 			for n2 in range(num_nodes):
-				#how much is a node changed by node n
 				array = pc_edge_corr[n1][n2]
 				weight_change_matrix[n1,n2] = np.sum(np.abs(array))
+				weight_change_matrix[n2,n1] = np.sum(np.abs(array))
 				weight_change_matrix_pos[n1,n2] = np.sum(array[array>0])
+				weight_change_matrix_pos[n2,n1] = np.sum(array[array>0])
 				weight_change_matrix_neg[n1,n2] = np.sum(array[array<0])
+				weight_change_matrix_neg[n2,n1] = np.sum(array[array<0])
+				# for n3 in range(264):
+				# 	if n1 == n3:
+				# 		continue
+				# 	if array[3] <= 0.0:
+				# 		continue
+				# 	if known_membership[n3] != known_membership[n2]:
+				# 		weight_change_matrix_between[n1,n2] += abs(array[n3])
+				# 		weight_change_matrix_between[n2,n1] += abs(array[n3])
+				# 	else:
+				# 		weight_change_matrix_within[n1,n2] += abs(array[n3])
+				# 		weight_change_matrix_within[n2,n1] += abs(array[n3])
 		# matrices = static_results['matrices']
-		#correlate sum of negative weights by pc edge weight.
+		## correlate sum of negative weights by pc edge weight.
 
 		# sns.regplot(weight_change_matrix_neg.reshape(-1),np.nanmean(thresh_matrices,axis=0).reshape(-1),color='Blue',scatter=True,scatter_kws={'alpha':.15})
 		# plt.xlabel('Sum of negative pc modulation changes',size=24)
@@ -1583,18 +1613,11 @@ def connectivity_across_tasks(subjects=hcp_subjects):
 		sns.set_style("white")
 		sns.set_style("ticks")
 		with sns.plotting_context("paper",font_scale=4):
-			sns.regplot(weight_change_matrix.reshape(-1),np.nanmean(thresh_matrices,axis=0).reshape(-1),color='Red',scatter=True,scatter_kws={'alpha':.15})
+			sns.regplot(weight_change_matrix[connector_nodes].reshape(-1),np.nanmean(thresh_matrices,axis=0)[connector_nodes].reshape(-1),color='Red',scatter=True,scatter_kws={'alpha':.15})
 			plt.xlabel('Absolute Sum of All Modulation Changes')
 			plt.ylabel('Edge Weight Between Nodes')
-			# plt.yticks(size=16)
-			# plt.xticks(size=16)
 			plt.tight_layout()
 			plt.show()
-		print pearsonr(weight_change_matrix.reshape(-1),np.absolute(np.nanmean(thresh_matrices,axis=0).reshape(-1)))
-	for i in range(14):
-		print name_int_dict[i], pearsonr(community_mod_stregth[connector_nodes,i].reshape(-1),np.mean(community_stregth,axis=0)[connector_nodes,i].reshape(-1))
-	for i in range(14):
-		print name_int_dict[i], pearsonr(community_mod_stregth[non_connector_nodes,i].reshape(-1),np.mean(community_stregth,axis=0)[non_connector_nodes,i].reshape(-1))
 
 def performance_across_tasks(subjects=hcp_subjects):
 	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
@@ -1616,6 +1639,10 @@ def performance_across_tasks(subjects=hcp_subjects):
 	subjects = remove_missing_subjects(subjects,'REST',atlas,gamma,omega,msc_cost,window_size)
 	rest_static_results = graph_metrics(subjects,'REST',atlas)
 	rest_dynamic_results = dynamic_graph_metrics(subjects,'REST')
+	pc_thresh = 75
+	local_thresh = 25
+	rest_connector_nodes = np.where(np.nanmean(rest_static_results['subject_pcs'],axis=0)>=pc_thresh)[0]
+	rest_local_nodes = np.where(np.nanmean(rest_static_results['subject_pcs'],axis=0)<local_thresh)[0]
 	for name,color,int_value in zip(network_names,colors,known_membership):
 		name_int_dict[int_value] = name
 		color_int_dict[int_value] = color
@@ -1639,7 +1666,7 @@ def performance_across_tasks(subjects=hcp_subjects):
 		subjects = list(subjects)
 		subjects = remove_missing_subjects(subjects,task,atlas,gamma,omega,msc_cost,window_size)
 		static_results = graph_metrics(subjects,task,atlas)
-		dynamic_results = dynamic_graph_metrics(subjects,task)
+		dynamic_results = dynamic_graph_metrics(subjects,task,atlas)
 		subject_pcs = static_results['subject_pcs']
 		thresh_matrices = static_results['thresh_matrices']
 		subject_mods = static_results['subject_mods']
@@ -1676,68 +1703,101 @@ def performance_across_tasks(subjects=hcp_subjects):
 		connector_nodes = np.where(np.nanmean(subject_pcs,axis=0)>=pc_thresh)[0]
 		local_nodes = np.where(np.nanmean(subject_pcs,axis=0)<local_thresh)[0]
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
-		keep = np.isnan(task_perf) == False
-		fit_subjects = int(len(subjects)*.15)
+		to_delete = np.isnan(task_perf).copy()
+		to_delete = np.where(to_delete==True)
+		subject_pcs = np.delete(subject_pcs,to_delete,axis=0)
+		task_perf = np.delete(task_perf,to_delete)
+		fit_subject_len = int(len(subjects)*.20)
+		
 
-		clf = linear_model.BayesianRidge()
-		clf.fit(subject_pcs[keep][:-fit_subjects,local_nodes],task_perf[keep][:-fit_subjects])
-		test = task_perf[keep][-fit_subjects:]
-		prediction = clf.predict(subject_pcs[keep][-fit_subjects:,local_nodes])
-		result  = pearsonr(prediction,test)
-		print 'local nodes prediction: ' +  'r=' + str(result[0]) + ' , p=' + str(result[1])
-		local_coefs = clf.coef_.copy()
-		print 'mean local coefficient: ', np.mean(clf.coef_)
-		sns.set_style("white")
-		sns.set_style("ticks")
-		with sns.plotting_context("paper",font_scale=1):
-			sns.regplot(prediction,test,color=sns.color_palette("coolwarm",7)[0],label='Local Nodes')
-			plt.ylabel('Real Performance')
-			plt.xlabel('Predicted Performance')
-			plt.title('Local Nodes PC Prediction in %s Task'%(task.lower()))
-			# plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_local_prediction.jpeg'%(task),dpi=900)
-			time.sleep(1)
-			plt.close()
-		clf = linear_model.BayesianRidge()
-		clf.fit(subject_pcs[keep][:-fit_subjects,connector_nodes],task_perf[keep][:-fit_subjects])
-		prediction = clf.predict(subject_pcs[keep][-fit_subjects:,connector_nodes])
-		test = task_perf[keep][-fit_subjects:]
-		result = pearsonr(prediction,test)
-		sns.set_style("white")
-		sns.set_style("ticks")
-		with sns.plotting_context("paper",font_scale=1):
-			sns.regplot(prediction,test,color=sns.color_palette("coolwarm", 7)[-1],label='Connector Nodes')
-			plt.ylabel('Real Performance')
-			plt.xlabel('Predicted Performance')
-			plt.title('Connector Nodes PC Prediction in %s Task'%(task.lower()))
-			# plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_connector_prediction.jpeg'%(task),dpi=900)
-			time.sleep(1)
-			plt.close()
-		print 'connector nodes prediction: '+'r=' + str(result[0]) + ' , p=' + str(result[1])
-		connector_coefs = clf.coef_.copy()
+		# predict_nodes = local_nodes
+		# clf = linear_model.BayesianRidge(normalize=True,n_iter=1000)
+		# clf.fit(subject_pcs[keep][:-fit_subjects,predict_nodes],task_perf[keep][:-fit_subjects])
+		# prediction = clf.predict(subject_pcs[keep][-fit_subjects:,predict_nodes])
+		# print 'local nodes prediction: ' +  'r=' + str(result[0]) + ' , p=' + str(result[1])
+		# local_coefs = clf.coef_.copy()
+		# print 'mean local coefficient: ', np.mean(clf.coef_)
+		# sns.set_style("white")
+		# sns.set_style("ticks")
+		# with sns.plotting_context("paper",font_scale=1):
+		# 	sns.regplot(prediction,test,color=sns.color_palette("coolwarm",7)[0],label='Local Nodes')
+		# 	plt.ylabel('Real Performance')
+		# 	plt.xlabel('Predicted Performance')
+		# 	plt.title('Local Nodes PC Prediction in %s Task'%(task.lower()))
+		# 	# plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_local_prediction.jpeg'%(task),dpi=900)
+		# 	time.sleep(1)
+		# 	plt.close()
+
+		# predict_nodes = connector_nodes
+		# clf = linear_model.BayesianRidge(normalize=True,n_iter=1000)
+		# clf.fit(subject_pcs[keep][:-fit_subjects,predict_nodes],task_perf[keep][:-fit_subjects])
+		# prediction = clf.predict(subject_pcs[keep][-fit_subjects:,predict_nodes])
+		# print 'local connector prediction: ' +  'r=' + str(result[0]) + ' , p=' + str(result[1])
+		# local_coefs = clf.coef_.copy()
+		# print 'mean connector coefficient: ', np.mean(clf.coef_)
+		# sns.set_style("white")
+		# sns.set_style("ticks")
+		# with sns.plotting_context("paper",font_scale=1):
+		# 	sns.regplot(prediction,test,color=sns.color_palette("coolwarm", 7)[-1],label='Connector Nodes')
+		# 	plt.ylabel('Real Performance')
+		# 	plt.xlabel('Predicted Performance')
+		# 	plt.title('Connector Nodes PC Prediction in %s Task'%(task.lower()))
+		# 	# plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_connector_prediction.jpeg'%(task),dpi=900)
+		# 	time.sleep(1)
+		# 	plt.close()
+		# print 'connector nodes prediction: '+'r=' + str(result[0]) + ' , p=' + str(result[1])
+		# connector_coefs = clf.coef_.copy()
+		print 'running'
+		"""
+		connector nodes' prediction
+		"""
+		predict_nodes = connector_nodes
+		scores = []
+		p_vals = []
+		predictions = []
+		all_subjects = range(len(task_perf))
+		for fit_subjects in combinations(all_subjects,fit_subject_len):
+			fit_subjects = np.array(fit_subjects)
+			clf = linear_model.BayesianRidge(normalize=True)
+			test_subjects = []
+			for i in all_subjects:
+				if i not in fit_subjects:
+					test_subjects.append(i)
+			clf.fit(subject_pcs[fit_subjects][:,predict_nodes],task_perf[fit_subjects])
+			prediction = clf.predict(subject_pcs[test_subjects][:,predict_nodes])
+			test = task_perf[test_subjects]
+			result = pearsonr(prediction,test)
+			scores.append(result[0])
+			p_vals.append(result[1])
+			connector_coefficients.append(clf.coef_)
+			print 'mean connector prediction: ' + 'r=: ' + str(np.mean(scores)) + ' p=: ' + str(np.mean(p_vals))
+		"""
+		local nodes' prediction
+		"""
+		predict_nodes = local_nodes
+		scores = []
+		p_vals = []
+		for fit_subjects in combinations(all_subjects,fit_subject_len):
+			clf = linear_model.BayesianRidge(normalize=True)
+			test_subjects = []
+			for i in all_subjects:
+				if i not in fit_subjects:
+					test_subjects.append(i)
+			clf.fit(subject_pcs[fit_subjects][:,predict_nodes],task_perf[fit_subjects])
+			prediction = clf.predict(subject_pcs[test_subjects][:,predict_nodes])
+			test = task_perf[test_subjects]
+			result = pearsonr(prediction,test)
+			scores.append(result[0])
+			p_vals.append(result[1])
+			local_coefficients.append(clf.coef_)
+		
+		print 'mean local prediction: ' + 'r=: ' + str(np.mean(scores)) + ' p=: ' + str(np.mean(p_vals))
+		
+
 		print 'mean connector coefficient: ', np.mean(clf.coef_)
 		result = scipy.stats.ttest_ind(connector_coefs,local_coefs)
 		print 'difference in coefficients: ' +'t=' + str(result[0]) + ' , p=' + str(result[1])
 		
-		
-		
-		clf = linear_model.LinearRegression()
-		clf.fit(subject_pcs[keep][:-fit_subjects],task_perf[keep][:-fit_subjects])
-		prediction = clf.predict(subject_pcs[keep][-fit_subjects:])
-		test = task_perf[keep][-fit_subjects:]
-		result = pearsonr(prediction,test)
-		all_coefs = clf.coef_.copy()
-		print 'all nodes prediction: '+'r=' + str(result[0]) + ' , p=' + str(result[1])
-
-		sns.set_style("white")
-		sns.set_style("ticks")
-		with sns.plotting_context("paper",font_scale=1):
-			sns.regplot(prediction,test,color=sns.color_palette("coolwarm", 7)[-1],label='All Nodes')
-			plt.ylabel('Real Performance')
-			plt.xlabel('Predicted Performance')
-			plt.title('Connector Nodes PC Prediction in %s Task'%(task.lower()))
-			# plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_all_prediction.jpeg'%(task),dpi=900)
-			time.sleep(1)
-			plt.close()
 
 		connector_coefficients.append(connector_coefs)
 		local_coefficients.append(local_coefs)
@@ -1754,6 +1814,7 @@ def performance_across_tasks(subjects=hcp_subjects):
 
 	result = scipy.stats.ttest_ind(np.array(connector_coefficients).reshape(-1),np.array(local_coefficients).reshape(-1))
 	print 'average difference in coefficients: ' +'t=' + str(result[0]) + ' , p=' + str(result[1])
+	1/0
 	coeff_df = []
 	for c in connector_coefficients:
 		coeff_df.append([c,'Connector Coefficient',' '])
@@ -1842,6 +1903,8 @@ SGE Inputs
 """
 
 if len(sys.argv) > 1:
+	if sys.argv[1] == 'perf':
+		performance_across_tasks()
 	if sys.argv[1] == 'multislice':
 		subject = sys.argv[2]
 		task = sys.argv[3]
