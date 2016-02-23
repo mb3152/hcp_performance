@@ -441,9 +441,9 @@ def remove_missing_subjects(subjects,task,atlas='power'):
 			subjects.remove(subject)
 	return subjects
 
-def connectivity_across_tasks(subjects=hcp_subjects.copy()):
+def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 	global hcp_subjects
-	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
+	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']
 	project='hcp'
 	atlas='power'
 	known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
@@ -464,12 +464,11 @@ def connectivity_across_tasks(subjects=hcp_subjects.copy()):
 	
 	for task in tasks:
 		print task
-		subjects = np.array(hcp_subjects).copy()
-		subjects = list(subjects)
-		subjects = remove_missing_subjects(subjects,task,atlas)
+		subjects = remove_missing_subjects(list(np.array(hcp_subjects).copy()),task,atlas)
 		static_results = graph_metrics(subjects,task,atlas)
 		subject_pcs = static_results['subject_pcs']
 		subject_mods = static_results['subject_mods']
+		matrices = static_results['matrices']
 		task_perf = task_performance(subjects,task)
 		assert subject_pcs.shape[0] == len(subjects)
 		mean_pc = np.nanmean(subject_pcs,axis=0)
@@ -482,82 +481,91 @@ def connectivity_across_tasks(subjects=hcp_subjects.copy()):
 			df_array.append([mean_pc[node],task,mod_pc_corr[node]])
 		df = pd.concat([df,pd.DataFrame(df_array,columns=df_columns)],axis=0)
 	
-	#make figures
-		#Figure 1
-		eng = matlab.engine.start_matlab()
-		eng.addpath('/home/despoB/mb3152/BrainNet/')
-		target_node = 185
-		while True:
-			figure_subjects = np.random.randint(0,450,3)
-			if (np.argsort(subject_pcs[[figure_subjects],target_node]) == np.argsort(subject_mods[[figure_subjects]])).all():
-				break
-		for subject in figure_subjects:
-			write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-			write_df[3] = np.nanmean(subject_pcs,axis=0)
-			write_df[4] = 3
-			write_df[4][target_node] = 5
-			write_df[3] = known_membership
-			write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.node'%(subject),sep='\t',index=False,names=False,header=False)
-			write_matrix = matrices[subject].copy()
-			for i,j in combinations(range(264),2):
-				if i != target_node:
-					if j != target_node:
-						write_matrix[i,j] = 0.0
-						write_matrix[j,i] = 0.0
-			matrix_df = pd.DataFrame(write_matrix)
-			matrix_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.edge'%(subject),sep='\t',index=False,names=False,header=False)
-			node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.node'%(subject)
-			edge_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.edge'%(subject)
-			surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
-			img_file = 'figure_1_%s_mod(%s)_pc(%s).png' %(str(subject),str(subject_mods[subject]),str(subject_pcs[subject][258]))
-			configs = '/home/despoB/mb3152/BrainNet/pc_values_edges.mat'
-			eng.BrainNet_MapCfg(node_file,edge_file,surf_file,img_file,configs)
-			# eng.BrainNet_MapCfg(node_file,edge_file,surf_file,configs)
-		np.save('/home/despoB/mb3152/dynamic_mod/brain_figures/figure_1_data.npy',np.array([figure_subjects,subject_pcs[figure_subjects,258],subject_mods[figure_subjects]]))
-		# figure 2
-		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-		pcs = np.nanmean(subject_pcs,axis=0)
-		write_df[3] = pcs
-		# maxv = np.nanmean(pcs) + (np.nanstd(pcs)*2.5)
-		# minv = np.nanmean(pcs) - (np.nanstd(pcs)*2.5)
-		# write_df[3][pcs > maxv] = maxv
-		# write_df[3][pcs < minv] = minv	
-		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task),sep='\t',index=False,names=False,header=False)
-		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-		write_df[3] = mod_pc_corr
-		# maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2.5)
-		# minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2.5)
-		# write_df[3][mod_pc_corr > maxv] = maxv
-		# write_df[3][mod_pc_corr < minv] = minv
-		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)			
-		node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task)
-		surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
-		img_file = 'figure_2_mod_pc_corr.png'
-		configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
-		eng.BrainNet_MapCfg(node_file,surf_file,configs)
+	# #make figures
+	# 	#Figure 1
+	# 	1/0
+	# 	import matlab
+	# 	eng = matlab.engine.start_matlab()
+	# 	eng.addpath('/home/despoB/mb3152/BrainNet/')
+	# 	target_node = 258
+	# 	while True:
+	# 		figure_subjects = np.random.randint(0,450,10)
+	# 		if (np.argsort(subject_pcs[[figure_subjects],target_node]) == np.argsort(subject_mods[[figure_subjects]])).all():
+	# 			break
+	# 	for subject in figure_subjects:
+	# 		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+	# 		write_df[3] = np.nanmean(subject_pcs,axis=0)
+	# 		write_df[4] = 3
+	# 		write_df[4][target_node] = 5
+	# 		write_df[3] = known_membership
+	# 		write_df[known_membership == 0] = 0.0
+	# 		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.node'%(subject),sep='\t',index=False,names=False,header=False)
+	# 		write_matrix = matrices[subject].copy()
+	# 		write_matrix = brain_graphs.threshold(write_matrix,cost=0.15)
+	# 		for i,j in combinations(range(264),2):
+	# 			if i != target_node:
+	# 				if j != target_node:
+	# 					write_matrix[i,j] = 0.0
+	# 					write_matrix[j,i] = 0.0
+	# 		matrix_df = pd.DataFrame(write_matrix)
+	# 		matrix_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.edge'%(subject),sep='\t',index=False,names=False,header=False)
+	# 		node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.node'%(subject)
+	# 		edge_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/subject_%s.edge'%(subject)
+	# 		surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+	# 		img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/figure_1_%s_mod(%s)_pc(%s).png' %(str(subject),str(np.round(subject_mods[subject],2)),str(np.round(subject_pcs[subject][258],2)))
+	# 		configs = '/home/despoB/mb3152/BrainNet/pc_values_edges.mat'
+	# 		eng.BrainNet_MapCfg(node_file,edge_file,surf_file,img_file,configs)
+	# 	np.save('/home/despoB/mb3152/dynamic_mod/brain_figures/figure_1_data.npy',np.array([figure_subjects,subject_pcs[figure_subjects,target_node],subject_mods[figure_subjects]]))
+	# 	# figure 2
+	# 	write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+	# 	pcs = np.nanmean(subject_pcs,axis=0)
+	# 	write_df[3] = pcs
+	# 	# maxv = np.nanmean(pcs) + (np.nanstd(pcs)*2.75)
+	# 	# minv = np.nanmean(pcs) - (np.nanstd(pcs)*2.75)
+	# 	# write_df[3][pcs > maxv] = maxv
+	# 	# write_df[3][pcs < minv] = minv	
+	# 	write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task),sep='\t',index=False,names=False,header=False)
+	# 	node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task)
+	# 	surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+	# 	img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/figure_2_pc_%s.png' %(task)
+	# 	configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
+	# 	eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
+	# 	#mod pc values
+	# 	write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+	# 	write_df[3] = mod_pc_corr
+	# 	maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2.75)
+	# 	minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2.75)
+	# 	write_df[3][mod_pc_corr > maxv] = maxv
+	# 	write_df[3][mod_pc_corr < minv] = minv
+	# 	write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)			
+	# 	node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task)
+	# 	surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+	# 	img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/figure_2_mod_pc_corr_%s.png' %(task)
+	# 	configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
+	# 	eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
 
 
-	# Correlations between Diversity Facilitated Modularity Change and PC of each Node.
-	for task in tasks:
-		r = nan_pearsonr(df['Diversity Facilitated Modularity Change'][df.Task==task],df['Participation Coefficient'][df.Task==task])
-		print task + ': r=' +str(np.around(r[0],3)) +', p=' + str( np.round(r[1],10))
-	with sns.plotting_context("paper",font_scale=1):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',size=(6))
-		g = g.map(sns.regplot,'Diversity Facilitated Modularity Change','Participation Coefficient',scatter_kws={'alpha':.95})
-		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PCxPCxModularity.pdf',dpi=2400)
-		plt.close()
+	# # Correlations between Diversity Facilitated Modularity Change and PC of each Node.
+	# for task in tasks:
+	# 	r = nan_pearsonr(df['Diversity Facilitated Modularity Change'][df.Task==task],df['Participation Coefficient'][df.Task==task])
+	# 	print task + ': r=' +str(np.around(r[0],3)) +', p=' + str( np.round(r[1],10))
+	# sns.set_style("white")
+	# sns.set_style("ticks")
+	# with sns.plotting_context("paper",font_scale=1):
+	# 	g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',col_wrap=3)
+	# 	g = g.map(sns.regplot,'Diversity Facilitated Modularity Change','Participation Coefficient',scatter_kws={'alpha':.95})
+	# 	sns.despine()
+	# 	plt.tight_layout()
+	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PCxPCxModularity.pdf',dpi=3600)
+	# 	plt.close()
 	
-	#Brain images of PC and Diversity Facilitated Modularity Change
-	for task in tasks:
-
-		
+		#Brain images of PC and Diversity Facilitated Modularity Change
 		"""
 		Make a matrix of each node's PC correlation to all edges in the graph.
 		"""
 		predict_nodes = np.where(mod_pc_corr>0.0)[0]
 		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
-		pc_edge_corr = pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas))
+		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
 		
 		# only consider edges that are present in the graph if you take the top half of correlations. 
 		edge_thresh = 50
@@ -722,8 +730,13 @@ def connectivity_across_tasks(subjects=hcp_subjects.copy()):
 		# violin_df = violin_df.append(pd.DataFrame(data=task_violin_df,columns=violin_columns),ignore_index=True)
 
 		# Figure for single Task
-		# sns.violinplot(x="Edge Type", y="Changes", hue="Node Type", data=task_violin_df,inner="quart",split=True)
-		# plt.show()		
+	# with sns.plotting_context("paper",font_scale=1):
+	# 	sns.violinplot(x="Edge Type", y="Changes", hue="Node Type", data=task_violin_df,inner="quart",split=True,cut=0)
+	# 	sns.despine()
+	# 	plt.tight_layout()
+	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_edge_mod_%s.pdf'%(task),dpi=3600)
+	# 	plt.show()	
+	
 
 	# Average of All
 	# sns.violinplot(x="Edge Type", y="Changes", hue="Node Type", data=violin_df,inner="quart",split=True)
@@ -813,41 +826,6 @@ def connectivity_across_tasks(subjects=hcp_subjects.copy()):
 				plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_all_connectivity_%s.jpeg'%(task,str(driver_nodes)),dpi=3600)
 				plt.close()
 
-			temp_matrix = np.nanmean(matrices,axis=0)
-			sns.set_style("white")
-			sns.set_style("ticks")
-			weight_matrix = weight_change_matrix_pos
-			r=pearsonr(weight_matrix[weight_matrix!=0.0].reshape(-1),temp_matrix[weight_matrix!=0.0].reshape(-1))
-			r = np.round(r[0],3),np.round(r[1],3)
-			print pearsonr(weight_matrix[weight_matrix!=0.0].reshape(-1),temp_matrix[weight_matrix!=0.0].reshape(-1))
-			assert np.max(abs(np.diagonal(weight_matrix))) == 0.0
-			# with sns.plotting_context("paper",font_scale=1):
-			# 	sns.regplot(weight_matrix[weight_matrix!=0.0].reshape(-1),temp_matrix[weight_matrix!=0.0].reshape(-1),color='Red',scatter=True,scatter_kws={'alpha':.15},label = r)
-			# 	plt.xlabel("Nodes' Diversity Faciliated Positive Connectivity Changes")
-			# 	plt.ylabel('Edge Weight Between Nodes')
-			# 	plt.legend(loc='best')
-			# 	plt.tight_layout()
-			# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_pos_connectivity_%s.jpeg'%(task,str(driver_nodes)),dpi=1200)
-			# 	plt.show()
-			# 	plt.close()
-
-			temp_matrix = np.nanmean(matrices,axis=0)
-			sns.set_style("white")
-			sns.set_style("ticks")
-			weight_matrix = weight_change_matrix_neg
-			r=pearsonr(weight_matrix[weight_matrix!=0.0].reshape(-1),temp_matrix[weight_matrix!=0.0].reshape(-1))
-			r = np.round(r[0],3),np.round(r[1],3)
-			print pearsonr(weight_matrix[weight_matrix!=0.0].reshape(-1),temp_matrix[weight_matrix!=0.0].reshape(-1))
-			# assert np.max(abs(np.diagonal(weight_matrix))) == 0.0
-			# with sns.plotting_context("paper",font_scale=1):
-			# 	sns.regplot(weight_matrix[weight_matrix!=0.0].reshape(-1),temp_matrix[weight_matrix!=0.0].reshape(-1),color='Blue',scatter=True,scatter_kws={'alpha':.15},label = r)
-			# 	plt.xlabel("Nodes' Diversity Faciliated Negative Connectivity Changes")
-			# 	plt.ylabel('Edge Weight Between Nodes')
-			# 	plt.legend(loc='best')
-			# 	plt.tight_layout()
-			# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_neg_connectivity_%s.jpeg'%(task,str(driver_nodes)),dpi=1200)
-			# 	plt.show()
-			# 	plt.close()
 	"""
 	Are connector nodes modulating the edges that are most variable across subjects?
 	"""
@@ -897,7 +875,6 @@ def connectivity_across_tasks(subjects=hcp_subjects.copy()):
 	plt.show()
 	plt.show()
 
-
 def performance_across_tasks(subjects=hcp_subjects):
 	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
 	project='hcp'
@@ -923,11 +900,9 @@ def performance_across_tasks(subjects=hcp_subjects):
 		subjects = list(subjects)
 		subjects = remove_missing_subjects(subjects,task,atlas)
 		static_results = graph_metrics(subjects,task,atlas,run_version='fz')
-		# dynamic_results = dynamic_graph_metrics(subjects,task,atlas)
 		subject_pcs = static_results['subject_pcs'].copy()
 		matrices = static_results['matrices']
 		subject_mods = static_results['subject_mods']
-		# subject_changes = dynamic_results['subject_changes']
 		if task == 'REST':
 			task_perf = behavioral_performance(subjects,behavioral_tasks)
 			mean_task_perf = np.nanmean(task_perf,axis=1)
@@ -977,7 +952,6 @@ def performance_across_tasks(subjects=hcp_subjects):
 		print 'Correlation between mean PC of Local Nodes: ', nan_pearsonr(task_perf,np.array(mean_local_pc))
 		print 'Correlation between Q and Performance: ', nan_pearsonr(task_perf,subject_mods)
 		print 't test, median split, Q: ', scipy.stats.ttest_ind(task_perf[np.argsort(subject_mods)[len(subject_mods)/2:]],task_perf[np.argsort(subject_mods)[:len(subject_mods)/2]],equal_var=False)
-		1/0
 		array_len = len(diff)
 		str_list = np.chararray(array_len,itemsize=20)
 		str_list[:]= task
@@ -988,19 +962,16 @@ def performance_across_tasks(subjects=hcp_subjects):
 		append_array[:,1][:array_len/2] = 'Integrated'
 		append_array[:,1][array_len/2:] = 'Modular'
 		diff_df = diff_df.append(pd.DataFrame(data=append_array,columns=['Task','Modularity_Type','Performance']),ignore_index=True)
-	# sns.set(style="whitegrid", palette="pastel", color_codes=True)
-	# diff_df['Performance'] = diff_df['Performance'].astype(float)
-	# sns.violinplot(x="Task", y="Performance", hue="Modularity_Type", data=diff_df,inner="quart",split=True,palette={"Integrated": "b", "Modular": "y"})
-	# plt.show()
+
+	sns.set(style="whitegrid", palette="pastel", color_codes=True)
 	with sns.plotting_context("paper",font_scale=1):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',size=(6))
-		g = g.map(sns.regplot,'Diversity Facilitated Modularity Change','Participation Coefficient',scatter_kws={'alpha':.95})
+		diff_df['Performance'] = diff_df['Performance'].astype(float)
+		sns.violinplot(x="Task", y="Performance", hue="Modularity_Type", data=diff_df,inner="quart",split=True,palette={"Integrated": "b", "Modular": "y"})
+		sns.despine()
 		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PCxPCxModularity.pdf',dpi=2400)
-		plt.close()	
-
-
-
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/task_performance.pdf',dpi=3600)
+		plt.show()
+	
 	for task in tasks:
 		print ' ' 
 		print task + ' Results'
@@ -1010,37 +981,25 @@ def performance_across_tasks(subjects=hcp_subjects):
 		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
 		print 'PCxModularity, PCxPerformance'
 		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PCxPerformance[df.Task==task])
-		# print 'Mean PC by Modularity'
-		# print pearsonr(subject_mods,np.nanmean(subject_pcs,axis=1))
-		# print 'Random'
-		# print pearsonr(df.Random_PCxPerformance[df.Task==task],df.PC[df.Task==task])
-		# print pearsonr(df.Random_ChangexPerformance[df.Task==task],df.Change[df.Task==task])	
-		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-		perf_pc_corr = df.PCxPerformance[df.Task==task]
-		write_df[3] = perf_pc_corr
-		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_perf_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)
 	
-
-	#plot those results 
+	#plot those results
 	sns.set_style("white")
 	sns.set_style("ticks")
-	colors = np.array(sns.palettes.color_palette('Paired',7))
-	with sns.plotting_context("paper",font_scale=2):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],size=(6))
-		g = g.map(sns.regplot,'PC','PCxPerformance',scatter_kws={'alpha':.95})
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'PCxPerformance','PC',scatter_kws={'alpha':.95})
+		sns.despine()
 		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_PC_Performance.pdf',dpi=3600)
 		plt.show()
-	with sns.plotting_context("paper",font_scale=3):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],size=(5))
-		g = g.map(sns.regplot,'PCxModularity','PC',scatter_kws={'alpha':.95})
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'PCxPerformance','PCxModularity',scatter_kws={'alpha':.95})
+		sns.despine()
 		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_Modularity_PC_Performance.pdf',dpi=3600)
 		plt.show()
-	with sns.plotting_context("paper",font_scale=2):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],size=(6))
-		g = g.map(sns.regplot,'PCxModularity','PCxPerformance',scatter_kws={'alpha':.95})
-		plt.tight_layout()
-		plt.show()
-
 
 def test_norm_edge_weights(subjects=hcp_subjects,atlas='power'):
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
