@@ -72,6 +72,33 @@ def task_performance(subjects,task):
 			all_performance.append(np.nan)
 	return np.array(all_performance)
 
+def test_reteset_task_performance(subjects,task):
+	performance_1 = []
+	performance_2 = []
+	bdf = pd.read_csv('/home/despoB/mb3152/dynamic_mod/os_behavior_data.csv')	
+	for subject in subjects:
+		files = glob.glob('/home/despoB/mb3152/scanner_performance_data/%s_tfMRI_*%s*_Stats.csv' %(subject,task))
+		try:
+			df = pd.read_csv(files[0])
+			df = pd.read_csv(files[1])
+		except:
+			continue
+		for i,f in enumerate(files):
+			df = pd.read_csv(f)
+			if task == 'WM':
+				t_performance = np.mean(df['Value'][[24,27,30,33]])
+			if task == 'RELATIONAL':
+				t_performance = np.mean([df['Value'][0],df['Value'][1]])
+			if task == 'LANGUAGE':
+				t_performance = np.mean([df['Value'][2],df['Value'][5]])
+			if task == 'SOCIAL':
+				t_performance = np.mean([df['Value'][0],df['Value'][5]])
+			if i == 0:
+				performance_1.append(t_performance)
+			if i == 1:
+				performance_2.append(t_performance)
+	print nan_pearsonr(performance_1,performance_2)
+
 def behavioral_performance(subjects,tasks):
 	"""
 	which edges correlate with performance?
@@ -480,7 +507,6 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 		for node in range(264):
 			df_array.append([mean_pc[node],task,mod_pc_corr[node]])
 		df = pd.concat([df,pd.DataFrame(df_array,columns=df_columns)],axis=0)
-	
 	# #make figures
 	# 	#Figure 1
 	# 	1/0
@@ -602,10 +628,14 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 		
 		for n in predict_nodes:
 			for community in np.unique(known_membership):
+				if community == 0:
+					continue
 				community_nodes = np.where(known_membership==community)[0]
 				connector_within_network_mask[n][np.ix_(community_nodes,community_nodes)] = True
 		for n in local_predict_nodes:
 			for community in np.unique(known_membership):
+				if community == 0:
+					continue
 				community_nodes = np.where(known_membership==community)[0]
 				local_within_network_mask[n][np.ix_(community_nodes,community_nodes)] = True
 
@@ -728,14 +758,15 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 
 		# append for average of all tasks
 		# violin_df = violin_df.append(pd.DataFrame(data=task_violin_df,columns=violin_columns),ignore_index=True)
-
 		# Figure for single Task
-	# with sns.plotting_context("paper",font_scale=1):
-	# 	sns.violinplot(x="Edge Type", y="Changes", hue="Node Type", data=task_violin_df,inner="quart",split=True,cut=0)
-	# 	sns.despine()
-	# 	plt.tight_layout()
-	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_edge_mod_%s.pdf'%(task),dpi=3600)
-	# 	plt.show()	
+	sns.set_style("white")
+	sns.set_style("ticks")
+	colors = sns.color_palette(['#fdfd96','#C4D8E2'])
+	with sns.plotting_context("paper",font_scale=2):
+		sns.violinplot(palette = {'Connector': colors[0],'Local':colors[1]},x="Edge Type", y="Changes", hue="Node Type",order=['Within Sub-Network, Positive','Between Sub-Network, Negative','Within Sub-Network, Negative','Between Sub-Network, Positive'], data=task_violin_df,inner="quart",split=True,cut=0)
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_edge_mod_%s.pdf'%(task),dpi=4600)
 	
 
 	# Average of All
@@ -830,17 +861,13 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 	Are connector nodes modulating the edges that are most variable across subjects?
 	"""
 	atlas='power'
-	gamma=1.0
-	omega=0.1
-	msc_cost = 0.1
-	window_size=100
 	network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
 	for task in tasks:
 		pc_thresh = 75
 		local_thresh = 25
 		subjects = np.array(hcp_subjects).copy()
 		subjects = list(subjects)
-		subjects = remove_missing_subjects(subjects,task,atlas,gamma,omega,msc_cost,window_size)
+		subjects = remove_missing_subjects(subjects,task,atlas)
 		static_results = graph_metrics(subjects,task,atlas)
 		subject_pcs = static_results['subject_pcs']
 		matrices = static_results['matrices']
@@ -854,26 +881,43 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 	"""
 	rich club stuff
 	"""
-	cost = 0.2
-	graph = brain_graphs.matrix_to_igraph(np.nanmean(static_results['matrices'],axis=0),cost=cost)
-	degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
-	average_randomized_phis = np.mean([RC(preserve_strength(graph),scores=graph.strength(weights='weight')).phis() for i in range(500)])
-	degree_normalized_phis = degree_emperical_phis/average_randomized_phis
-	graph = brain_graphs.matrix_to_igraph(np.nanmean(static_results['matrices'],axis=0),cost=cost)
-	pc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight')).pc
-	pc[np.isnan(pc)] = 0.0
-	pc_emperical_phis = RC(graph, scores=pc).phis()
-	pc_average_randomized_phis = np.mean([RC(preserve_strength(graph),scores=pc).phis() for i in range(500)])
-	pc_normalized_phis = pc_emperical_phis/pc_average_randomized_phis
-	plt.plot(pc_normalized_phis,color='b',linestyle='-',label='PC')
-	plt.plot(degree_normalized_phis,color='r',linestyle='-',label='Degree')
-	# plt.plot(pc_emperical_phis,color='b')
-	# plt.plot(degree_emperical_phis,color='r')
-	plt.legend()
-	plt.ylabel('Normalized Rich Club Coefficient')
-	plt.xlabel('PC/Degree Rank')
-	plt.show()
-	plt.show()
+	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
+	for task in tasks:
+		atlas = 'power'
+		subjects = np.array(hcp_subjects).copy()
+		subjects = list(subjects)
+		subjects = remove_missing_subjects(subjects,task,atlas)
+		static_results = graph_metrics(subjects,task,atlas)
+		subject_pcs = static_results['subject_pcs']
+		matrices = static_results['matrices']
+		avg_pc_normalized_phis = []
+		avg_degree_normalized_phis = []
+		for cost in np.arange(5,16)*0.01:
+			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
+			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost)
+			degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
+			average_randomized_phis = np.mean([RC(preserve_strength(graph),scores=graph.strength(weights='weight')).phis() for i in range(1000)])
+			degree_normalized_phis = degree_emperical_phis/average_randomized_phis
+			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost)
+			pc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight')).pc
+			pc[np.isnan(pc)] = 0.0
+			pc_emperical_phis = RC(graph, scores=pc).phis()
+			pc_average_randomized_phis = np.mean([RC(preserve_strength(graph),scores=pc).phis() for i in range(1000)])
+			pc_normalized_phis = pc_emperical_phis/pc_average_randomized_phis
+			avg_pc_normalized_phis.append(pc_normalized_phis)
+			avg_degree_normalized_phis.append(degree_normalized_phis)
+		sns.set_style("white")
+		sns.set_style("ticks")
+		with sns.plotting_context("paper",font_scale=1):	
+			sns.tsplot(avg_degree_normalized_phis,color='b',condition='Degree',ci=99)
+			sns.tsplot(avg_pc_normalized_phis,color='r',condition='PC',ci=99)
+			plt.ylabel('Normalized Rich Club Coefficient')
+			plt.xlabel('Rank')
+			sns.despine()
+			plt.legend()
+			plt.tight_layout
+			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(task),dpi=3600)
+			plt.close()
 
 def performance_across_tasks(subjects=hcp_subjects):
 	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
@@ -891,6 +935,8 @@ def performance_across_tasks(subjects=hcp_subjects):
 		color_int_dict[int_value] = color
 	df = pd.DataFrame(columns=['PC','Task','PCxPerformance','PCxModularity'])
 	diff_df = pd.DataFrame(columns=['Task','Modularity_Type','Performance'])
+	task_perf_df_cols = ['Task','Modularity Increasing Diversity Value','Performance']
+	task_perf_df = pd.DataFrame(columns=task_perf_df_cols)
 	for task in tasks:
 		"""
 		see which graph metrics correlate with modularity and performance
@@ -918,7 +964,6 @@ def performance_across_tasks(subjects=hcp_subjects):
 		for node in range(subject_pcs.shape[1]):
 			df_array.append([mean_pc[node],task,nan_pearsonr(subject_pcs[:,node],mean_task_perf)[0],mod_pc_corr[node]])
 		df = pd.concat([df,pd.DataFrame(df_array,columns=['PC','Task','PCxPerformance','PCxModularity'])],axis=0)
-
 		"""
 		predict performance using high and low PCS values. 
 		"""
@@ -943,78 +988,102 @@ def performance_across_tasks(subjects=hcp_subjects):
 		mean_pc = []
 		mean_local_pc = []
 		for s in range(len(task_perf)):
-			mean_pc.append(np.nanmean(scipy.stats.zscore(subject_pcs,axis=1)[s,predict_nodes]))
-			mean_local_pc.append(np.nanmean(scipy.stats.zscore(subject_pcs,axis=1)[s,local_predict_nodes]))
+			# mean_pc.append(np.nanmean(scipy.stats.zscore(subject_pcs,axis=1)[s,predict_nodes]))
+			# mean_local_pc.append(np.nanmean(scipy.stats.zscore(subject_pcs,axis=1)[s,local_predict_nodes]))
+			mean_pc.append(np.nanmean(subject_pcs[s,predict_nodes]))
+			mean_local_pc.append(np.nanmean(subject_pcs[s,local_predict_nodes]))
 		diff = np.array(mean_pc)-np.array(mean_local_pc)
-		print 't test, median split: ', scipy.stats.ttest_ind(task_perf[np.argsort(diff)[len(diff)/2:]],task_perf[np.argsort(diff)[:len(diff)/2]])
-		print 'Correlation between difference of connector and local PC scores: ', nan_pearsonr(scipy.stats.zscore(task_perf),np.array(mean_pc)-np.array(mean_local_pc))
-		print 'Correlation between mean PC of Connector Nodes: ', nan_pearsonr(task_perf,np.array(mean_pc))
-		print 'Correlation between mean PC of Local Nodes: ', nan_pearsonr(task_perf,np.array(mean_local_pc))
-		print 'Correlation between Q and Performance: ', nan_pearsonr(task_perf,subject_mods)
-		print 't test, median split, Q: ', scipy.stats.ttest_ind(task_perf[np.argsort(subject_mods)[len(subject_mods)/2:]],task_perf[np.argsort(subject_mods)[:len(subject_mods)/2]],equal_var=False)
+		t_test = scipy.stats.ttest_ind(task_perf[np.argsort(diff)[len(diff)/2:]],task_perf[np.argsort(diff)[:len(diff)/2]])
+		diff_corr = nan_pearsonr(scipy.stats.zscore(task_perf),np.array(mean_pc)-np.array(mean_local_pc))
+		high_mod_corr = nan_pearsonr(task_perf,np.array(mean_pc))
+		low_mod_corr = nan_pearsonr(task_perf,np.array(mean_local_pc))
+
+		print 't test, median split, t:', str(np.round(t_test[0],3)), 'p:', str(np.round(t_test[1],3))
+		print 'Correlation between difference of connector and local PC scores, r:', str(np.round(diff_corr[0],3)), 'p:', str(np.round(diff_corr[1],3))
+		print 'Correlation between mean PC of Connector Nodes, r:', str(np.round(high_mod_corr[0],3)), 'p:', str(np.round(high_mod_corr[1],3))
+		print 'Correlation between mean PC of Local Nodes, r:', str(np.round(low_mod_corr[0],3)), 'p:', str(np.round(low_mod_corr[1],3))
+		if task == 'SOCIAL':
+			print 'non cieling corr:', pearsonr(task_perf[task_perf<1],diff[task_perf<1])
 		array_len = len(diff)
-		str_list = np.chararray(array_len,itemsize=20)
+		str_list = np.chararray(array_len,itemsize=35)
 		str_list[:]= task
 		append_array = np.zeros((array_len,3)).astype(str)
 		append_array[:,0] = str_list
 		append_array[:,2] = scipy.stats.zscore(task_perf)[np.argsort(diff)]
 		append_array[:,1] = np.arange((array_len))[np.argsort(diff)].astype(str)
-		append_array[:,1][:array_len/2] = 'Integrated'
-		append_array[:,1][array_len/2:] = 'Modular'
+		append_array[:,1][:array_len/2] = 'Locally Diverse'
+		append_array[:,1][array_len/2:] = 'Globally Diverse'
 		diff_df = diff_df.append(pd.DataFrame(data=append_array,columns=['Task','Modularity_Type','Performance']),ignore_index=True)
+		
+		str_list = np.chararray(len(task_perf),itemsize=10)
+		str_list[:]= task
+		task_perf_array = np.zeros((len(task_perf),3)).astype(str)
+		task_perf_array[:,0] = str_list
+		task_perf_array[:,1] = np.array(mean_pc) - np.array(mean_local_pc)
+		task_perf_array[:,2] = scipy.stats.zscore(task_perf)
+		task_perf_df = task_perf_df.append([task_perf_df,pd.DataFrame(task_perf_array,columns=task_perf_df_cols)],ignore_index=True)
+
+	colors = sns.color_palette(['#fdfd96','#C4D8E2'])
+	sns.set(style="whitegrid", palette="pastel", color_codes=True)
+	with sns.plotting_context("paper"):
+		diff_df['Performance'] = diff_df['Performance'].astype(float)
+		sns.violinplot(x="Task", y="Performance", hue="Modularity_Type",data=diff_df,inner="quart",split=True,palette={'Globally Diverse': colors[0] , 'Locally Diverse': colors[1]})
+		sns.set()
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/task_performance.pdf',dpi=5600)
+		plt.close()
 
 	sns.set(style="whitegrid", palette="pastel", color_codes=True)
-	with sns.plotting_context("paper",font_scale=1):
-		diff_df['Performance'] = diff_df['Performance'].astype(float)
-		sns.violinplot(x="Task", y="Performance", hue="Modularity_Type", data=diff_df,inner="quart",split=True,palette={"Integrated": "b", "Modular": "y"})
-		sns.despine()
-		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/task_performance.pdf',dpi=3600)
-		plt.show()
-	
-	for task in tasks:
-		print ' ' 
-		print task + ' Results'
-		print 'PCxPerformance, PC'
-		print nan_pearsonr(df.PCxPerformance[df.Task==task],df.PC[df.Task==task])
-		print 'PCxModularity, PC'
-		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
-		print 'PCxModularity, PCxPerformance'
-		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PCxPerformance[df.Task==task])
-	
-	#plot those results
-	sns.set_style("white")
-	sns.set_style("ticks")
+	task_perf_df.Performance = task_perf_df.Performance.astype(float)
+	task_perf_df['Modularity Increasing Diversity Value'] = task_perf_df['Modularity Increasing Diversity Value'].astype(float)
 	colors = np.array(sns.palettes.color_palette('Paired',6))
 	with sns.plotting_context("paper",font_scale=1):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
-		g = g.map(sns.regplot,'PCxPerformance','PC',scatter_kws={'alpha':.95})
+		g = sns.FacetGrid(task_perf_df, hue='Task',col='Task', sharex=True,sharey=True,palette=colors[[0,2,4,5]])
+		g = g.map(sns.regplot,'Modularity Increasing Diversity Value','Performance',scatter_kws={'alpha':.5})
 		sns.despine()
 		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_PC_Performance.pdf',dpi=3600)
+		
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/task_performance_corr.pdf',dpi=3600)
 		plt.show()
-	with sns.plotting_context("paper",font_scale=1):
-		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
-		g = g.map(sns.regplot,'PCxPerformance','PCxModularity',scatter_kws={'alpha':.95})
-		sns.despine()
-		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_Modularity_PC_Performance.pdf',dpi=3600)
-		plt.show()
+		plt.close()
 
-def test_norm_edge_weights(subjects=hcp_subjects,atlas='power'):
-	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
-	for task in tasks:	
-		for subject in subjects:
-			s_matrix = []
-			files = glob.glob('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_*%s*_matrix.npy'%(subject,atlas,task))
-			for f in files:
-				f = np.load(f)
-				np.fill_diagonal(f,0.0)
-				f[np.isnan(f)] = 0.0
-				f = np.arctanh(f)
-				s_matrix.append(f.copy())
-			s_matrix = np.nanmean(s_matrix,axis=0)
-			
+
+	# for task in tasks:
+	# 	print ' ' 
+	# 	print task + ' Results'
+	# 	print 'PCxPerformance, PC'
+	# 	print nan_pearsonr(df.PCxPerformance[df.Task==task],df.PC[df.Task==task])
+	# 	print 'PCxModularity, PC'
+	# 	print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
+	# 	print 'PCxModularity, PCxPerformance'
+	# 	print nan_pearsonr(df.PCxModularity[df.Task==task],df.PCxPerformance[df.Task==task])
+	#plot those results
+	# sns.set_style("white")
+	# sns.set_style("ticks")
+	# colors = np.array(sns.palettes.color_palette('Paired',6))
+	# with sns.plotting_context("paper",font_scale=1):
+	# 	g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+	# 	g = g.map(sns.regplot,'PCxPerformance','PC',scatter_kws={'alpha':.95})
+	# 	sns.despine()
+	# 	plt.tight_layout()
+	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_PC_Performance.pdf',dpi=3600)
+	# 	plt.show()
+	# with sns.plotting_context("paper",font_scale=1):
+	# 	g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+	# 	g = g.map(sns.regplot,'PCxPerformance','PCxModularity',scatter_kws={'alpha':.95})
+	# 	sns.despine()
+	# 	plt.tight_layout()
+	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_Modularity_PC_Performance.pdf',dpi=3600)
+	# 	plt.show()
+	
+	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
+	for task in tasks:
+		subjects = np.array(hcp_subjects).copy()
+		subjects = list(subjects)
+		subjects = remove_missing_subjects(subjects,task,'power')
+		test_reteset_task_performance(subjects,task)
+
 """
 SGE Inputs
 """
