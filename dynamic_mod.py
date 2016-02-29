@@ -261,14 +261,9 @@ def make_static_matrix(subject,task,project,atlas):
 	if project == 'nki':
 		subject_path = subject_dir.replace('SUBJECT',subject)
 	if project == 'hcp':
-		subject_path = hcp_resting_dir.replace('SUBJECT',subject)
-		subject_path = subject_path.replace('*rfMRI*',task)
-	if project == 'hcp_task':
-		subject_path = hcp_subject_dir.replace('SUBJECT',subject)
-		subject_path = subject_path.replace('TASK',task)
+		subject_path = hcp_subject_dir.replace('SUBJECT',subject).replace('TASK',task)
 	subject_time_series = brain_graphs.load_subject_time_series(subject_path)
-	matrix = brain_graphs.time_series_to_matrix(subject_time_series,parcel_path,voxel=False,fisher=False,out_file=None)
-	np.save('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_matrix.npy' %(subject,atlas,task),matrix)
+	brain_graphs.time_series_to_matrix(subject_time_series,parcel_path,voxel=False,fisher=False,out_file='/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_matrix.npy' %(subject,atlas,task))
 
 def run_multi_slice(subject,task,project,atlas='power',gamma=1.0,omega=.1,cost=0.1,window_size=100):
 	parcel_path = '/home/despoB/mb3152/dynamic_mod/atlases/%s_template.nii' %(atlas)
@@ -335,7 +330,7 @@ def individual_graph_analyes(variables):
 		del graph
 	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0),subject)
 
-def graph_metrics(subjects,task,atlas,project = 'hcp',run_version='fz'):
+def graph_metrics(subjects,task,atlas,project='hcp',run_version='fz'):
 	"""
 	run graph metrics or load them
 	"""
@@ -372,7 +367,7 @@ def graph_metrics(subjects,task,atlas,project = 'hcp',run_version='fz'):
 		subject_wmds = []
 		print 'Running Graph Theory Analyses'
 		from multiprocessing import Pool
-		pool = Pool(18)
+		pool = Pool(20)
 		results = pool.map(individual_graph_analyes,variables)		
 		for r,s in zip(results,subjects):
 			subject_mods.append(np.nanmean(r[0]))
@@ -401,35 +396,6 @@ def graph_metrics(subjects,task,atlas,project = 'hcp',run_version='fz'):
 	del thresh_matrices
 	return results
 
-def edge_weight_and_performance(tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],subjects=hcp_subjects,project='hcp',atlas='power',mean=False,thresh=75):
-	mean = []
-	abs_mean = []
-	for task in tasks:
-		subjects = np.array(hcp_subjects).copy()
-		subjects = remove_missing_subjects(subjects,task,atlas)
-		perf_matrix = edges_task_performance(subjects,task,atlas)
-		static_metrics = graph_metrics(subjects,task,atlas)
-		pc = np.nanmean(static_metrics['subject_pcs'],axis=0)
-		abs_matrix = np.absolute(perf_matrix.copy())
-		matrix = perf_matrix.copy()
-		matrix[np.isnan(matrix)] = 0.0
-		abs_matrix[np.isnan(abs_matrix)] = 0.0
-		pc_thresh = np.percentile(pc,75)
-		local_thresh = np.percentile(pc,25)
-		connectors = np.where(pc>=pc_thresh)[0]
-		non_connectors = np.where(pc<local_thresh)[0]
-		mean.append(matrix)
-		abs_mean.append(abs_matrix)
-		print task
-		print 'weighted'
-		print thresh, scipy.stats.ttest_ind(matrix[np.ix_(connectors,non_connectors)].reshape(-1),matrix[np.ix_(non_connectors,non_connectors)].reshape(-1))
-		print thresh, scipy.stats.ttest_ind(matrix[np.ix_(connectors,connectors)].reshape(-1),matrix[np.ix_(non_connectors,non_connectors)].reshape(-1))
-		print 'absolute'
-		print thresh, scipy.stats.ttest_ind(abs_matrix[np.ix_(connectors,non_connectors)].reshape(-1),abs_matrix[np.ix_(non_connectors,non_connectors)].reshape(-1))
-		print thresh, scipy.stats.ttest_ind(abs_matrix[np.ix_(connectors,connectors)].reshape(-1),abs_matrix[np.ix_(non_connectors,non_connectors)].reshape(-1))
-	sns.violinplot([matrix[np.ix_(connectors,connectors)].reshape(-1),matrix[np.ix_(connectors,non_connectors)].reshape(-1),matrix[np.ix_(non_connectors,non_connectors)].reshape(-1)])
-	plt.show()
-
 def check_motion(subjects):
 	for subject in subjects:
 	    e = np.load('/home/despoB/mb3152/dynamic_mod/component_activation/%s_12_False_engagement.npy' %(subject))
@@ -450,39 +416,44 @@ def pc_edge_correlation(subject_pcs,matrices,path):
 		np.save(path,pc_edge_corr)
 	return pc_edge_corr
 
-def remove_missing_subjects(subjects,task,atlas='power'):
+def remove_missing_subjects(subjects,task,atlas):
 	"""
 	remove missing subjects, original array is being edited
 	"""
 	subjects = list(subjects)
 	for subject in subjects:
-		# files = glob.glob('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_%s_%s_msc_%s_%s_*%s*.npy' %(subject,atlas,window_size,msc_cost,gamma,omega,task))
-		# if len(files) == 0.0:
-		# 	subjects.remove(subject)
-		# 	continue
-		# if len(np.load(files[0]).shape) < 2:
-		# 	subjects.remove(subject)
-		# 	continue
 		files = glob.glob('/home/despoB/mb3152/dynamic_mod/matrices/%s_%s_*%s*_matrix.npy'%(subject,atlas,task))
 		if len(files) < 2:
 			subjects.remove(subject)
 	return subjects
+
+def network_labels(atlas):
+	if atlas == 'gordon':
+		name_dict = {}
+		df = pd.read_excel('/home/despoB/mb3152/dynamic_mod/Parcels.xlsx')
+		df.Community[df.Community=='None'] = 'Uncertain'
+		for i,com in enumerate(np.unique(df.Community.values)):
+			name_dict[com] = i
+		known_membership = np.zeros((333))
+		for i in range(333):
+			known_membership[i] = name_dict[df.Community[i]]
+		network_names = np.array(df.Community.values).astype(str)
+	if atlas == 'power':
+		known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
+		known_membership[known_membership==-1] = 0
+		network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
+	name_int_dict = {}
+	for name,int_value in zip(network_names,known_membership):
+		name_int_dict[int_value] = name
+	return known_membership,network_names,len(known_membership),name_int_dict
 
 def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 	global hcp_subjects
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']
 	project='hcp'
 	atlas='power'
-	known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
-	known_membership[known_membership==-1] = 0
-	colors = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[34].values)
-	network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
-	num_nodes = len(known_membership)
-	name_int_dict = {}
-	color_int_dict = {}
-	for name,color,int_value in zip(network_names,colors,known_membership):
-		name_int_dict[int_value] = name
-		color_int_dict[int_value] = color
+	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
+
 	
 	df_columns=['Participation Coefficient','Task','Diversity Facilitated Modularity Change']
 	df = pd.DataFrame(columns = df_columns)
@@ -504,7 +475,7 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
 		print nan_pearsonr(mod_pc_corr,mean_pc)
 		df_array = []
-		for node in range(264):
+		for node in range(num_nodes):
 			df_array.append([mean_pc[node],task,mod_pc_corr[node]])
 		df = pd.concat([df,pd.DataFrame(df_array,columns=df_columns)],axis=0)
 	# #make figures
@@ -776,11 +747,10 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 	Specificity of modulation by nodes' PC.
 	Does the PC value of i impact the connectivity of j as i and j are more strongly connected?
 	"""
-	known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
-	known_membership[known_membership==-1] = 0
 	atlas = 'power'
 	project='hcp'
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
+	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
 	for task in tasks:
 		pc_thresh = 75
 		local_thresh = 25
@@ -800,7 +770,6 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 		edge_thresh = np.percentile(np.nanmean(matrices,axis=0),edge_thresh)
 		pc_edge_corr[:,np.nanmean(matrices,axis=0)<edge_thresh] = np.nan
 		for driver_nodes in driver_nodes_list:
-			num_nodes = 264
 			weight_change_matrix = np.zeros((num_nodes,num_nodes))
 			weight_change_matrix_between = np.zeros((num_nodes,num_nodes))
 			weight_change_matrix_within = np.zeros((num_nodes,num_nodes))
@@ -817,7 +786,7 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 			for n1,n2 in permutations(range(num_nodes),2):
 				if n1 not in driver_nodes_array:
 					continue
-				mask = np.ones((264),dtype=bool)
+				mask = np.ones((num_nodes),dtype=bool)
 				mask[n1] = False
 				array = pc_edge_corr[n1][n2]
 				masked_array = array[mask]
@@ -861,7 +830,7 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 	Are connector nodes modulating the edges that are most variable across subjects?
 	"""
 	atlas='power'
-	network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
+	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
 	for task in tasks:
 		pc_thresh = 75
 		local_thresh = 25
@@ -873,7 +842,7 @@ def connectivity_across_tasks(subjects=np.array(hcp_subjects).copy()):
 		matrices = static_results['matrices']
 		pc_edge_corr = pc_edge_correlation(subject_pcs,thresh_matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr.npy' %(project,task,atlas))
 		std_mod = []
-		for i in range(264):
+		for i in range(num_nodes):
 			std_mod.append(nan_pearsonr(pc_edge_corr[i].reshape(-1),np.std(matrices,axis=0).reshape(-1))[0])
 		print task, pearsonr(np.nanmean(subject_pcs,axis=0),std_mod)
 		plot_corr_matrix(np.std(matrices,axis=0),network_names.copy(),out_file=None,plot_corr=True,return_array=False)
@@ -923,16 +892,7 @@ def performance_across_tasks(subjects=hcp_subjects):
 	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
 	project='hcp'
 	atlas='power'
-	known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
-	known_membership[known_membership==-1] = 0
-	colors = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[34].values)
-	network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
-	num_nodes = len(known_membership)
-	name_int_dict = {}
-	color_int_dict = {}
-	for name,color,int_value in zip(network_names,colors,known_membership):
-		name_int_dict[int_value] = name
-		color_int_dict[int_value] = color
+	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
 	df = pd.DataFrame(columns=['PC','Task','PCxPerformance','PCxModularity'])
 	diff_df = pd.DataFrame(columns=['Task','Modularity_Type','Performance'])
 	task_perf_df_cols = ['Task','Modularity Increasing Diversity Value','Performance']
@@ -1107,9 +1067,13 @@ if len(sys.argv) > 1:
 		matrices = static_results['matrices']
 		pc_edge_corr = pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/hcp_%s_power_pc_edge_corr_z.npy' %(task))
 	if sys.argv[1] == 'graph_metrics':
-		atlas='power'
+		atlas='gordon'
 		subjects = remove_missing_subjects(list(np.array(hcp_subjects).copy()),sys.argv[2],atlas)
-		graph_metrics(subjects,task=sys.argv[2],atlas='power')
+		graph_metrics(subjects,task=sys.argv[2],atlas=atlas)
+	if sys.argv[1] == 'make_matrix':
+		subject = str(sys.argv[2])
+		task = str(sys.argv[3])
+		make_static_matrix(subject,task,'hcp','gordon')
 
 """
 Methods
