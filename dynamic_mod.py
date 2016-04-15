@@ -9,6 +9,7 @@ import subprocess
 import pickle
 import h5py
 import random
+import time
 import scipy
 from scipy.io import loadmat
 import scipy.io as sio
@@ -28,10 +29,17 @@ from richclub import preserve_strength, RC
 from multiprocessing import Pool
 sys.path.append('/home/despoB/mb3152/dynamic_mod/')
 from complexity import FunctionalComplexity_Linear
+from sklearn import linear_model, metrics, cross_validation
 
 global hcp_subjects
 hcp_subjects = os.listdir('/home/despoB/connectome-data/')
 hcp_subjects.sort()
+global pc_vals 
+global fit_matrices
+global task_perf
+pc_vals = []
+fit_matrices = []
+task_perf = []
 
 def nan_pearsonr(x,y):
 	x = np.array(x)
@@ -142,7 +150,7 @@ def behavioral_performance(subjects,tasks):
 				results[id_s,id_t] = np.nan
 	return results
 
-def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_array=True,plot_corr=True):
+def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_array=True,plot_corr=True,label=False):
 	swap_dict = {}
 	index = 0
 	corr_mat = np.zeros((matrix.shape))
@@ -176,9 +184,13 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 	y_names.reverse()
 	if block_lower:
 		corr_mat = scipy.triu(corr_mat)
-	sns.heatmap(corr_mat,square=True,yticklabels=y_names,xticklabels=x_names,linewidths=0.0,cmap="coolwarm")
-	ax.set_yticks(x_ticks)
-	ax.set_xticks(y_ticks)
+	if label==False:
+		y_names = []
+		x_names = []
+	else:
+		ax.set_yticks(x_ticks)
+		ax.set_xticks(y_ticks)
+	sns.heatmap(corr_mat,square=True,yticklabels=y_names,xticklabels=x_names,vmin=-.3,vmax=.3,linewidths=0.0,cmap="RdBu_r")
 	membership.sort()
 	# Use matplotlib directly to emphasize known networks
 	for i, network in enumerate(membership):
@@ -329,10 +341,10 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 	project='hcp'
 	atlas = 'power'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
-	df_columns=['Participation Coefficient','Task','Diversity Facilitated Modularity Change']
+	df_columns=['Participation Coefficient','Within-Community-Degree','Task','Diversity Facilitated Modularity Coefficient','Provinciality Facilitated Modularity Coefficient','PC-Q Coefficients','WMD-Q Coefficients']
 	df = pd.DataFrame(columns = df_columns)
-	violin_columns = ['Changes','Node Type','Edge Type']
-	violin_df = pd.DataFrame(columns=violin_columns)
+	loo_columns=['Task','Predicted Q','Q']
+	loo_df = pd.DataFrame(columns = loo_columns)
 	for task in tasks:
 		print task
 		subjects = np.array(hcp_subjects).copy()
@@ -342,19 +354,52 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		static_results = graph_metrics(subjects,task,atlas)
 		subject_pcs = static_results['subject_pcs']
 		subject_mods = static_results['subject_mods']
+		subject_wmds = static_results['subject_wmds']
 		matrices = static_results['matrices']
 		task_perf = task_performance(subjects,task)
 		assert subject_pcs.shape[0] == len(subjects)
 		mean_pc = np.nanmean(subject_pcs,axis=0)
+		mean_wmd = np.nanmean(subject_wmds,axis=0)
 		mod_pc_corr = np.zeros(subject_pcs.shape[1])
 		for i in range(subject_pcs.shape[1]):
 			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
-		print nan_pearsonr(mod_pc_corr,mean_pc)
+		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
+		for i in range(subject_wmds.shape[1]):
+			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
+		print 'Diversity Facilitated Modularity Coefficient, Mean PC: ', nan_pearsonr(mod_pc_corr,mean_pc)
+
+		pc_vals = subject_pcs.copy()
+		wmd_vals = subject_wmds.copy()
+		pvals = np.concatenate([wmd_vals,pc_vals],axis=1)
+		pvals[np.isnan(pvals)] = 0.0
+
+		clf = linear_model.BayesianRidge()
+		clf.fit(pvals,subject_mods)
+		print 'Nodal Role Prediction of Q: ', pearsonr(clf.predict(pvals),subject_mods)
+		print 'WMD, Coefficients of Q', pearsonr(mean_pc,clf.coef_[264:])
+		print 'PC, Coefficients of Q', pearsonr(mean_wmd,clf.coef_[:264])
 		df_array = []
 		for node in range(num_nodes):
-			df_array.append([mean_pc[node],task,mod_pc_corr[node]])
+			df_array.append([mean_pc[node],mean_wmd[node],task,mod_pc_corr[node],mod_wmd_corr[node],clf.coef_[264+node],clf.coef_[node]])
 		df = pd.concat([df,pd.DataFrame(df_array,columns=df_columns)],axis=0)
-	# #make figures
+		
+		q_prediction = []
+		for t in range(len(pvals)):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			clf = linear_model.BayesianRidge()
+			clf.fit(pvals[train],subject_mods[train])
+			q_prediction.append(clf.predict(pvals[t]))
+		print 'Nodal Role Prediction of Q, LOO: ', pearsonr(q_prediction,subject_mods)
+		loo_array = []
+		for i in range(len(q_prediction)):
+			loo_array.append([task,q_prediction[i],subject_mods[i]])
+		loo_df = pd.concat([loo_df,pd.DataFrame(loo_array,columns=loo_columns)],axis=0)
+
+
+	"""
+	make brain figures
+	"""
 	# 	#Figure 1
 	# 	1/0
 	# 	import matlab
@@ -417,29 +462,102 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 	# 	configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
 	# 	eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
 
+	sns.set_style("white")
+	sns.set_style("ticks")
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(loo_df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',col_wrap=3)
+		g = g.map(sns.regplot,'Predicted Q','Q',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/WMD_PC_Q_Prediction.pdf',dpi=3600)
+		plt.show()
 
-	# Correlations between Diversity Facilitated Modularity Change and PC of each Node.
-	# for task in tasks:
-	# 	r = nan_pearsonr(df['Diversity Facilitated Modularity Change'][df.Task==task],df['Participation Coefficient'][df.Task==task])
-	# 	print task + ': r=' +str(np.around(r[0],3)) +', p=' + str( np.round(r[1],10))
-	# sns.set_style("white")
-	# sns.set_style("ticks")
-	# with sns.plotting_context("paper",font_scale=1):
-	# 	g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',col_wrap=3)
-	# 	g = g.map(sns.regplot,'Diversity Facilitated Modularity Change','Participation Coefficient',scatter_kws={'alpha':.95})
-	# 	sns.despine()
-	# 	plt.tight_layout()
-	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PCxPCxModularity.pdf',dpi=3600)
-	# 	plt.close()
-	
-		#Brain images of PC and Diversity Facilitated Modularity Change
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',col_wrap=3)
+		g = g.map(sns.regplot,'Participation Coefficient','Diversity Facilitated Modularity Coefficient',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PCxPCxModularity.pdf',dpi=3600)
+		plt.show()
+
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',col_wrap=3)
+		g = g.map(sns.regplot,'Within-Community-Degree','Provinciality Facilitated Modularity Coefficient',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/WMDxWMDxModularity.pdf',dpi=3600)
+		plt.show()
+
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',col_wrap=3)
+		g = g.map(sns.regplot,'Participation Coefficient','PC-Q Coefficients',scatter_kws={'alpha':.95})
+		plt.ylim(np.min(df['PC-Q Coefficients']),np.max(df['PC-Q Coefficients']))
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC-Q_Coefs.pdf',dpi=3600)
+		plt.show()
+
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',col_wrap=3)
+		g = g.map(sns.regplot,'Within-Community-Degree','WMD-Q Coefficients',scatter_kws={'alpha':.95})
+		plt.ylim(np.min(df['WMD-Q Coefficients']),np.max(df['WMD-Q Coefficients']))
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/WMD-Q_Coefs.pdf',dpi=3600)
+		plt.show()
+
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=True,sharey=True,palette='Paired',col_wrap=3)
+		g = g.map(sns.regplot,'Within-Community-Degree','Participation Coefficient',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/WMDxPC.pdf',dpi=3600)
+		plt.show()
+
+
+	#Brain images of PC and Diversity Facilitated Modularity Change
+	"""
+	Make a matrix of each node's PC correlation to all edges in the graph.
+	"""
+	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']
+	project='hcp'
+	atlas = 'power'
+	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
+	violin_df = pd.DataFrame()
+	for task in tasks:
+		print task
+		subjects = np.array(hcp_subjects).copy()
+		subjects = list(subjects)
+		subjects = remove_missing_subjects(subjects,task,atlas)
+		assert (subjects == np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))).all()
+		static_results = graph_metrics(subjects,task,atlas)
+		subject_pcs = static_results['subject_pcs']
+		subject_mods = static_results['subject_mods']
+		subject_wmds = static_results['subject_wmds']
+		matrices = static_results['matrices']
+		task_perf = task_performance(subjects,task)
+		assert subject_pcs.shape[0] == len(subjects)
+		mean_pc = np.nanmean(subject_pcs,axis=0)
+		mean_wmd = np.nanmean(subject_wmds,axis=0)
+		mod_pc_corr = np.zeros(subject_pcs.shape[1])
+		for i in range(subject_pcs.shape[1]):
+			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
+		for i in range(subject_wmds.shape[1]):
+			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
 		"""
-		Make a matrix of each node's PC correlation to all edges in the graph.
+		for pc
 		"""
-		predict_nodes = np.where(mod_pc_corr>0.0)[0]
-		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
-		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
-		
+		# predict_nodes = np.where(mod_pc_corr>0.0)[0]
+		# local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
+		# pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
+		"""
+		for wcd
+		"""
+		predict_nodes = np.where(mod_wmd_corr>0.0)[0]
+		local_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
+		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_wmds,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(project,task,atlas)))
+
 		# only consider edges that are present in the graph if you take the top half of correlations. 
 		edge_thresh = 50
 		edge_thresh = np.percentile(np.nanmean(matrices,axis=0),edge_thresh)
@@ -515,42 +633,42 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 			append_array[:,1] = arrays_to_add[1]
 			append_array[:,2] = arrays_to_add[2]
 			return append_array
-
+		violin_columns = ["Changes","Node Type","Edge Type"]
 		task_violin_df = pd.DataFrame(columns=violin_columns)
 
-		result_array_to_add = pc_edge_corr[connector_within_network_mask].reshape(-1)[pc_edge_corr[connector_within_network_mask].reshape(-1)!=0.0]
-		edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, All')
-		node_type_ = make_strs_for_df(result_array_to_add,'Connector')
-		df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
-		task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
+		# result_array_to_add = pc_edge_corr[connector_within_network_mask].reshape(-1)[pc_edge_corr[connector_within_network_mask].reshape(-1)!=0.0]
+		# edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, All')
+		# node_type_ = make_strs_for_df(result_array_to_add,'Connector')
+		# df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
+		# task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 
-		result_array_to_add = pc_edge_corr[local_within_network_mask].reshape(-1)[pc_edge_corr[local_within_network_mask].reshape(-1)!=0.0]
-		edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, All')
-		node_type_ = make_strs_for_df(result_array_to_add,'Local')
-		df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
-		task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
+		# result_array_to_add = pc_edge_corr[local_within_network_mask].reshape(-1)[pc_edge_corr[local_within_network_mask].reshape(-1)!=0.0]
+		# edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, All')
+		# node_type_ = make_strs_for_df(result_array_to_add,'Local')
+		# df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
+		# task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 		
-		task_violin_df.Changes = task_violin_df.Changes.astype(float)
+		# task_violin_df.Changes = task_violin_df.Changes.astype(float)
 
-		print 'Within Sub-Network, All: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Within Sub-Network, All'],
-			task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Within Sub-Network, All']))
+		# print 'Within Sub-Network, All: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Within Sub-Network, All'],
+		# 	task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Within Sub-Network, All']))
 		
-		result_array_to_add = pc_edge_corr[connector_between_network_mask].reshape(-1)[pc_edge_corr[connector_between_network_mask].reshape(-1)!=0.0]
-		edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, All')
-		node_type_ = make_strs_for_df(result_array_to_add,'Connector')
-		df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
-		task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
+		# result_array_to_add = pc_edge_corr[connector_between_network_mask].reshape(-1)[pc_edge_corr[connector_between_network_mask].reshape(-1)!=0.0]
+		# edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, All')
+		# node_type_ = make_strs_for_df(result_array_to_add,'Connector')
+		# df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
+		# task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 
-		result_array_to_add = pc_edge_corr[local_between_network_mask].reshape(-1)[pc_edge_corr[local_between_network_mask].reshape(-1)!=0.0]
-		edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, All')
-		node_type_ = make_strs_for_df(result_array_to_add,'Local')
-		df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
-		task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
+		# result_array_to_add = pc_edge_corr[local_between_network_mask].reshape(-1)[pc_edge_corr[local_between_network_mask].reshape(-1)!=0.0]
+		# edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, All')
+		# node_type_ = make_strs_for_df(result_array_to_add,'Local')
+		# df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
+		# task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 		
-		task_violin_df.Changes = task_violin_df.Changes.astype(float)
+		# task_violin_df.Changes = task_violin_df.Changes.astype(float)
 
-		print 'Between Sub-Network, All: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Between Sub-Network, All'],
-			task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Between Sub-Network, All']))
+		# print 'Between Sub-Network, All: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Between Sub-Network, All'],
+		# 	task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Between Sub-Network, All']))
 
 		result_array_to_add = pc_edge_corr_pos[connector_within_network_mask].reshape(-1)[pc_edge_corr_pos[connector_within_network_mask].reshape(-1)>0]
 		edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, Positive')
@@ -567,7 +685,6 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		task_violin_df.Changes = task_violin_df.Changes.astype(float)
 		print 'Within Sub-Network, Positive: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Within Sub-Network, Positive'],
 			task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Within Sub-Network, Positive']))
-
 
 		result_array_to_add = pc_edge_corr_pos[connector_between_network_mask].reshape(-1)[pc_edge_corr_pos[connector_between_network_mask].reshape(-1)>0]
 		edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, Positive')
@@ -620,41 +737,41 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		print 'Between Sub-Network, Negative: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Between Sub-Network, Negative'],
 			task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Between Sub-Network, Negative']))
 
-		result_array_to_add = pc_edge_corr_abs[connector_within_network_mask].reshape(-1)[pc_edge_corr_abs[connector_within_network_mask].reshape(-1)>0]
-		edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, Absolute')
-		node_type_ = make_strs_for_df(result_array_to_add,'Connector')
-		df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
-		task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
+		# result_array_to_add = pc_edge_corr_abs[connector_within_network_mask].reshape(-1)[pc_edge_corr_abs[connector_within_network_mask].reshape(-1)>0]
+		# edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, Absolute')
+		# node_type_ = make_strs_for_df(result_array_to_add,'Connector')
+		# df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
+		# task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 
-		result_array_to_add = pc_edge_corr_abs[local_within_network_mask].reshape(-1)[pc_edge_corr_abs[local_within_network_mask].reshape(-1)>0]
-		edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, Absolute')
-		node_type_ = make_strs_for_df(result_array_to_add,'Local')
-		df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
-		task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
+		# result_array_to_add = pc_edge_corr_abs[local_within_network_mask].reshape(-1)[pc_edge_corr_abs[local_within_network_mask].reshape(-1)>0]
+		# edge_type_ = make_strs_for_df(result_array_to_add,'Within Sub-Network, Absolute')
+		# node_type_ = make_strs_for_df(result_array_to_add,'Local')
+		# df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
+		# task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 		
-		task_violin_df.Changes = task_violin_df.Changes.astype(float)
+		# task_violin_df.Changes = task_violin_df.Changes.astype(float)
 		
-		print 'Within Sub-Network, Absolute: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Within Sub-Network, Absolute'],
-			task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Within Sub-Network, Absolute']))
+		# print 'Within Sub-Network, Absolute: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Within Sub-Network, Absolute'],
+		# 	task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Within Sub-Network, Absolute']))
 
-		result_array_to_add = pc_edge_corr_abs[connector_between_network_mask].reshape(-1)[pc_edge_corr_abs[connector_between_network_mask].reshape(-1)>0]
-		edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, Absolute')
-		node_type_ = make_strs_for_df(result_array_to_add,'Connector')
-		df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
-		task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
+		# result_array_to_add = pc_edge_corr_abs[connector_between_network_mask].reshape(-1)[pc_edge_corr_abs[connector_between_network_mask].reshape(-1)>0]
+		# edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, Absolute')
+		# node_type_ = make_strs_for_df(result_array_to_add,'Connector')
+		# df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
+		# task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 
-		result_array_to_add = pc_edge_corr_abs[local_between_network_mask].reshape(-1)[pc_edge_corr_abs[local_between_network_mask].reshape(-1)>0]
-		edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, Absolute')
-		node_type_ = make_strs_for_df(result_array_to_add,'Local')
-		df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
-		task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
+		# result_array_to_add = pc_edge_corr_abs[local_between_network_mask].reshape(-1)[pc_edge_corr_abs[local_between_network_mask].reshape(-1)>0]
+		# edge_type_ = make_strs_for_df(result_array_to_add,'Between Sub-Network, Absolute')
+		# node_type_ = make_strs_for_df(result_array_to_add,'Local')
+		# df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
+		# task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 		
-		task_violin_df.Changes = task_violin_df.Changes.astype(float)
+		# task_violin_df.Changes = task_violin_df.Changes.astype(float)
 		
-		print 'Between Sub-Network, Absolute: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Between Sub-Network, Absolute'],
-			task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Between Sub-Network, Absolute']))
-		1/0
-		# append for average of all tasks
+		# print 'Between Sub-Network, Absolute: ' + str(scipy.stats.ttest_ind(task_violin_df.Changes[task_violin_df['Node Type']=='Connector'][task_violin_df['Edge Type']=='Between Sub-Network, Absolute'],
+		# 	task_violin_df.Changes[task_violin_df['Node Type']=='Local'][task_violin_df['Edge Type']=='Between Sub-Network, Absolute']))
+
+		# append for average of all task
 		violin_df = violin_df.append(pd.DataFrame(data=task_violin_df,columns=violin_columns),ignore_index=True)
 		# Figure for single Task
 		sns.set_style("white")
@@ -665,23 +782,26 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 			sns.despine()
 			plt.tight_layout()
 			plt.ylim(0.,.3)
-			plt.show()
 			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_edge_mod_%s.pdf'%(task),dpi=4600)
-			plt.close()
 
 	print 'Within Sub-Network, Positive: ' + str(scipy.stats.ttest_ind(violin_df.Changes[violin_df['Node Type']=='Connector'][violin_df['Edge Type']=='Within Sub-Network, Positive'],
-		task_violin_df.Changes[violin_df['Node Type']=='Local'][violin_df['Edge Type']=='Within Sub-Network, Positive']))
+		violin_df.Changes[violin_df['Node Type']=='Local'][violin_df['Edge Type']=='Within Sub-Network, Positive']))
 	print 'Within Sub-Network, Negative: ' + str(scipy.stats.ttest_ind(violin_df.Changes[violin_df['Node Type']=='Connector'][violin_df['Edge Type']=='Within Sub-Network, Negative'],
-		task_violin_df.Changes[violin_df['Node Type']=='Local'][violin_df['Edge Type']=='Within Sub-Network, Negative']))
+		violin_df.Changes[violin_df['Node Type']=='Local'][violin_df['Edge Type']=='Within Sub-Network, Negative']))
+	print 'Between Sub-Network, Positive: ' + str(scipy.stats.ttest_ind(violin_df.Changes[violin_df['Node Type']=='Connector'][violin_df['Edge Type']=='Between Sub-Network, Positive'],
+		violin_df.Changes[violin_df['Node Type']=='Local'][violin_df['Edge Type']=='Between Sub-Network, Positive']))
+	print 'Between Sub-Network, Negative: ' + str(scipy.stats.ttest_ind(violin_df.Changes[violin_df['Node Type']=='Connector'][violin_df['Edge Type']=='Between Sub-Network, Negative'],
+		violin_df.Changes[violin_df['Node Type']=='Local'][violin_df['Edge Type']=='Between Sub-Network, Negative']))
 	# Average of All
 	sns.set_style("white")
 	sns.set_style("ticks")
 	colors = sns.color_palette(['#fdfd96','#C4D8E2'])
 	with sns.plotting_context("paper",font_scale=2):
-		sns.violinplot(palette = {'Connector': colors[0],'Local':colors[1]},x="Edge Type", y="Changes", hue="Node Type",order=['Within Sub-Network, Positive','Within Sub-Network, Negative'], data=violin_df,inner="quart",split=True,cut=0)
-		# sns.violinplot(x="Edge Type", y="Changes", hue="Node Type", data=violin_df,inner="quart",split=True)
+		sns.violinplot(palette = {'Connector': colors[0],'Local':colors[1]},x="Edge Type", y="Changes", hue="Node Type",order=['Within Sub-Network, Positive','Within Sub-Network, Negative','Between Sub-Network, Positive','Between Sub-Network, Negative'], data=violin_df,inner="quart",split=True,cut=0)
 		plt.ylim(0.,.3)
-		plt.show()	
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/wmd_edge_mod_avg.pdf',dpi=4600)
+		plt.close()
+	
 	"""
 	Specificity of modulation by nodes' PC.
 	Does the PC value of i impact the connectivity of j as i and j are more strongly connected?
@@ -698,11 +818,16 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		subjects = remove_missing_subjects(subjects,task,atlas)
 		static_results = graph_metrics(subjects,task,atlas)
 		subject_pcs = static_results['subject_pcs']
+		subject_wmds = static_results['subject_wmds']
 		matrices = static_results['matrices']
-		pc_edge_corr = pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas))
-		pc_thresh = np.percentile(np.nanmean(subject_pcs,axis=0),pc_thresh)
-		connector_nodes = np.where(np.nanmean(subject_pcs,axis=0)>=pc_thresh)[0]
-		local_nodes = np.where(np.nanmean(subject_pcs,axis=0)<=local_thresh)[0]
+		# pc_edge_corr = pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas))
+		# pc_thresh = np.percentile(np.nanmean(subject_pcs,axis=0),pc_thresh)
+		pc_edge_corr = pc_edge_correlation(subject_wmds,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(project,task,atlas))
+		pc_thresh = np.percentile(np.nanmean(subject_wmds,axis=0),pc_thresh)
+		# connector_nodes = np.where(np.nanmean(subject_pcs,axis=0)>=pc_thresh)[0]
+		# local_nodes = np.where(np.nanmean(subject_pcs,axis=0)<=local_thresh)[0]
+		connector_nodes = np.where(np.nanmean(subject_wmds,axis=0)>=pc_thresh)[0]
+		local_nodes = np.where(np.nanmean(subject_wmds,axis=0)<=local_thresh)[0]
 		#sum of weight changes for each node, by each node.
 		driver_nodes_list = ['connector_nodes','local_nodes']
 		edge_thresh = 50.0
@@ -710,12 +835,6 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		pc_edge_corr[:,np.nanmean(matrices,axis=0)<edge_thresh] = np.nan
 		for driver_nodes in driver_nodes_list:
 			weight_change_matrix = np.zeros((num_nodes,num_nodes))
-			weight_change_matrix_between = np.zeros((num_nodes,num_nodes))
-			weight_change_matrix_within = np.zeros((num_nodes,num_nodes))
-			weight_change_matrix_between_pos = np.zeros((num_nodes,num_nodes))
-			weight_change_matrix_within_pos = np.zeros((num_nodes,num_nodes))
-			weight_change_matrix_between_neg = np.zeros((num_nodes,num_nodes))
-			weight_change_matrix_within_neg = np.zeros((num_nodes,num_nodes))
 			weight_change_matrix_pos = np.zeros((num_nodes,num_nodes))
 			weight_change_matrix_neg = np.zeros((num_nodes,num_nodes))
 			if driver_nodes == 'local_nodes':
@@ -732,21 +851,6 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 				weight_change_matrix[n1,n2] = np.nansum(np.abs(masked_array))
 				weight_change_matrix_pos[n1,n2] = abs(np.nansum(masked_array[masked_array>0]))
 				weight_change_matrix_neg[n1,n2] = abs(np.nansum(masked_array[masked_array<0]))
-				# for n3 in range(264):
-				# 	if n1 == n3:
-				# 		continue
-				# 	if known_membership[n3] != known_membership[n2]:
-				# 		weight_change_matrix_between[n1,n2] = np.nansum([array[n3],weight_change_matrix_between[n1,n2]])
-				# 		if array[n3] > 0.0:
-				# 			weight_change_matrix_between_pos[n1,n2] = np.nansum([array[n3],weight_change_matrix_between_pos[n1,n2]])
-				# 		else:
-				# 			weight_change_matrix_between_neg[n1,n2] = np.nansum([array[n3],weight_change_matrix_between_neg[n1,n2]])
-				# 	else:
-				# 		weight_change_matrix_within[n1,n2] = np.nansum([array[n3],weight_change_matrix_within[n1,n2]])
-				# 		if array[n3] > 0.0:
-				# 			weight_change_matrix_within_pos[n1,n2] = np.nansum([array[n3],weight_change_matrix_within_pos[n1,n2]])
-				# 		else:
-				# 			weight_change_matrix_within_neg[n1,n2] = np.nansum([array[n3],weight_change_matrix_within_neg[n1,n2]])
 			print driver_nodes
 			temp_matrix = np.nanmean(matrices,axis=0)
 			sns.set_style("white")
@@ -790,7 +894,7 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 	"""
 	rich club stuff
 	"""
-	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
+	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']
 	for task in tasks:
 		atlas = 'power'
 		print task
@@ -806,8 +910,18 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		for cost in np.arange(5,21)*0.01:
 			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
-			if graph.is_connected() == False:
-				continue
+			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
+			if cost == .1:
+				vc = graph.community_infomap(edge_weights='weight',trials=500)
+				if task == 'WM':
+					membership = np.array(pd.read_csv('/home/despoB/mb3152/human_wm.csv').community.values)
+					np.fill_diagonal(temp_matrix,0.0)	
+					plot_corr_matrix(temp_matrix,membership,return_array=False,out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_corr_mat_fin.pdf'%(task),label=False)		
+				else:
+					np.fill_diagonal(temp_matrix,0.0)
+					vc = graph.community_infomap(edge_weights='weight')
+					plot_corr_matrix(temp_matrix,vc.membership,return_array=False,out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_corr_mat_fin.pdf'%(task),label=False)			
+			
 			degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
 			average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(100)],axis=0)
 			degree_normalized_phis = degree_emperical_phis/average_randomized_phis
@@ -824,28 +938,30 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 			# graph.vs['pc_rc'] = pc_rc
 			# degree_rc = np.array(graph.strength(weights='weight')) > np.percentile(graph.strength(weights='weight'),80)
 			# graph.vs['degree_rc'] = degree_rc
+			# 1/0
 			# graph.write_gml('human_gephi.gml')
 
-			# import matlab
-			# eng = matlab.engine.start_matlab()
-			# eng.addpath('/home/despoB/mb3152/BrainNet/')
-			# write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-			# write_df[3] = graph.strength(weights='weight')
-			# write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/%s_degree.node'%(task),sep='\t',index=False,names=False,header=False)
-			# node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/%s_degree.node'%(task)
-			# surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
-			# img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/%s_degree.png' %(task)
-			# configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
-			# eng.BrainNet_MapCfg(node_file,surf_file,img_file,configs)
 
-			# write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-			# write_df[3] = pc
-			# write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/%s_pc_avg.node'%(task),sep='\t',index=False,names=False,header=False)
-			# node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/%s_pc_avg.node'%(task)
-			# surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
-			# img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/%s_pc_avg.png' %(task)
-			# configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
-			# eng.BrainNet_MapCfg(node_file,surf_file,img_file,configs)
+			import matlab
+			eng = matlab.engine.start_matlab()
+			eng.addpath('/home/despoB/mb3152/BrainNet/')
+			write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+			write_df[3] = graph.strength(weights='weight')
+			write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/%s_degree.node'%(task),sep='\t',index=False,names=False,header=False)
+			node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/%s_degree.node'%(task)
+			surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+			img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/%s_degree.png' %(task)
+			configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
+			eng.BrainNet_MapCfg(node_file,surf_file,img_file,configs)
+
+			write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+			write_df[3] = pc
+			write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/%s_pc_avg.node'%(task),sep='\t',index=False,names=False,header=False)
+			node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/%s_pc_avg.node'%(task)
+			surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+			img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/%s_pc_avg.png' %(task)
+			configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
+			eng.BrainNet_MapCfg(node_file,surf_file,img_file,configs)
 			avg_pc_normalized_phis.append(pc_normalized_phis)
 			avg_degree_normalized_phis.append(degree_normalized_phis)
 		sns.set_style("white")
@@ -861,16 +977,38 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(task),dpi=3600)
 			plt.close()
 
+def classifier(t):
+	train = np.ones(len(pc_vals)).astype(bool)
+	train[t] = False
+	print 'fitting pc/Q model'
+	clf = linear_model.BayesianRidge()
+	clf.fit(pc_vals[train],task_perf[train])
+	pc_prediction = clf.predict(pc_vals[t])
+	print 'fitting edge model'
+	clf = linear_model.BayesianRidge()
+	clf.fit(fit_matrices[train],task_perf[train])
+	matrix_prediction = clf.predict(fit_matrices[t])
+	return pc_prediction,matrix_prediction
+
+def pc_classifier(t):
+	train = np.ones(len(pc_vals)).astype(bool)
+	train[t] = False
+	clf = linear_model.BayesianRidge()
+	clf.fit(pc_vals[train],task_perf[train])
+	pc_prediction = clf.predict(pc_vals[t])
+	return pc_prediction
+
 def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']):
-	global hcp_subjects
 	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
 	project='hcp'
 	atlas='power'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels('power')
-	df = pd.DataFrame(columns=['PC','Task','PCxPerformance','PCxModularity'])
+	df = pd.DataFrame(columns=['PC','WCD','Task','PCxPerformance','PCxModularity','WCDxPerformance','WCDxModularity','PC_Coefs','WMD_Coefs'])
 	diff_df = pd.DataFrame(columns=['Task','Modularity_Type','Performance'])
 	task_perf_df_cols = ['Task','Modularity Increasing Diversity Value','Performance']
 	task_perf_df = pd.DataFrame(columns=task_perf_df_cols)
+	loo_columns= ['Task','Nodal Predicted Performance','Q Predicted Performance','Mean Nodal Predicted Performance','Mean PC Predicted Performance','Mean WCD Predicted Performance','Performance']
+	loo_df = pd.DataFrame(columns = loo_columns)
 	for task in tasks:
 		"""
 		see which graph metrics correlate with modularity and performance
@@ -879,35 +1017,24 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		subjects = np.array(hcp_subjects).copy()
 		subjects = list(subjects)
 		subjects = remove_missing_subjects(subjects,task,atlas)
-		# print len(subjects)
 		assert (subjects == np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))).all()
 		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))
 		static_results = graph_metrics(subjects,task,atlas,run_version='fz')
 		subject_pcs = static_results['subject_pcs'].copy()
 		matrices = static_results['matrices']
 		subject_mods = static_results['subject_mods']
-		if task == 'REST':
-			task_perf = behavioral_performance(subjects,behavioral_tasks)
-			mean_task_perf = np.nanmean(task_perf,axis=1)
-		else:
-			task_perf = task_performance(subjects,task)
-			mean_task_perf = task_perf
+		subject_wmds = static_results['subject_wmds']
+		task_perf = task_performance(subjects,task)
 		assert subject_pcs.shape[0] == len(subjects)
 		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
 		df_array = []
 		mod_pc_corr = np.zeros(subject_pcs.shape[1])
 		for i in range(subject_pcs.shape[1]):
 			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
-		for node in range(subject_pcs.shape[1]):
-			df_array.append([mean_pc[node],task,nan_pearsonr(subject_pcs[:,node],mean_task_perf)[0],mod_pc_corr[node]])
-		df = pd.concat([df,pd.DataFrame(df_array,columns=['PC','Task','PCxPerformance','PCxModularity'])],axis=0)
-		subject_complexity = []
-		for i,subject in enumerate(subjects):
-			temp_matrix = matrices[i].copy()
-			temp_matrix[temp_matrix>1] = 1
-			temp_matrix[temp_matrix<0] = 0.
-			subject_complexity.append(FunctionalComplexity_Linear(temp_matrix))
-		subject_complexity = np.array(subject_complexity)
+		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
+		for i in range(subject_wmds.shape[1]):
+			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
+		
 		"""
 		predict performance using high and low PCS values. 
 		"""
@@ -916,56 +1043,133 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			to_delete = np.where(to_delete==True)
 			subject_pcs = np.delete(subject_pcs,to_delete,axis=0)
 			subject_mods = np.delete(subject_mods,to_delete)
-			subject_complexity = np.delete(subject_complexity,to_delete)
+			subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
 			task_perf = np.delete(task_perf,to_delete)
-
-		pc_thresh = np.percentile(np.nanmean(subject_pcs,axis=0),75)
-		local_thresh = np.percentile(np.nanmean(subject_pcs,axis=0),25)
-		connector_nodes = np.where(np.nanmean(subject_pcs,axis=0)>=pc_thresh)[0]
-		local_nodes = np.where(np.nanmean(subject_pcs,axis=0)<local_thresh)[0]
+		task_perf = scipy.stats.zscore(task_perf)
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
-		# predict_nodes = connector_nodes
-		# local_predict_nodes = local_nodes
-		# predict_nodes = np.where(mod_pc_corr>np.percentile(mod_pc_corr,75))
-		# local_predict_nodes = np.where(mod_pc_corr<=np.percentile(mod_pc_corr,75))
+		subject_wmds[np.isnan(subject_wmds)] = 0.0
+
+
+		"""
+		prediction / cross validation
+		"""
+		# pvals = subject_wmds
+		# pvals = subject_pcs
+		pvals = np.concatenate([subject_pcs,subject_wmds],axis=1)
+		clf = linear_model.BayesianRidge()
+		clf.fit(pvals,task_perf)
+		print 'PC Prediction of Performance: ', pearsonr(clf.predict(pvals),task_perf)
+		print 'WMD, Coefficients of Performance', pearsonr(np.nanmean(subject_wmds,axis=0),clf.coef_[264:])
+		print 'PC, Coefficients of Performance', pearsonr(np.nanmean(subject_pcs,axis=0),clf.coef_[:264])
+		
+		for node in range(subject_pcs.shape[1]):
+			df_array.append([np.nanmean(subject_pcs,axis=0)[node],np.nanmean(subject_wmds,axis=0)[node],task,nan_pearsonr(subject_pcs[:,node],task_perf)[0],mod_pc_corr[node],nan_pearsonr(subject_wmds[:,node],task_perf)[0],mod_wmd_corr[node],clf.coef_[node],clf.coef_[node*2]])
+		df = pd.concat([df,pd.DataFrame(df_array,columns=['PC','WCD','Task','PCxPerformance','PCxModularity','WCDxPerformance','WCDxModularity','PC_Coefs','WMD_Coefs'])],axis=0)
+		
+		pvals = np.concatenate([subject_pcs,subject_wmds],axis=1)
+		# nodal_prediction = np.ones(len(task_perf))
+		nodal_prediction = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			clf = linear_model.BayesianRidge()
+			clf.fit(pvals[train],task_perf[train])
+			nodal_prediction.append(clf.predict(pvals[t]))
+		print 'Nodal Prediction of Performance, LOO: ', pearsonr(nodal_prediction,task_perf)
+		
+		# q_performance_prediction = np.ones(len(task_perf))
+		q_performance_prediction = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			clf = linear_model.BayesianRidge()
+			clf.fit(subject_mods.reshape(len(subject_mods),1)[train],task_perf[train])
+			q_performance_prediction.append(clf.predict(subject_mods[t]))
+		print 'Q Prediction of Performance, LOO: ', pearsonr(np.array(q_performance_prediction).reshape(-1),task_perf)
+
 		predict_nodes = np.where(mod_pc_corr>0.0)[0]
 		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
-
+		wmd_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
+		wmd_local_predict_nodes = np.where(mod_wmd_corr>0.0)[0]
 		mean_pc = []
 		mean_local_pc = []
+		mean_wmd = []
+		mean_local_wmd = []
 		for s in range(len(task_perf)):
 			mean_pc.append(np.nanmean(subject_pcs[s,predict_nodes]))
 			mean_local_pc.append(np.nanmean(subject_pcs[s,local_predict_nodes]))
-		diff = np.array(mean_pc)-np.array(mean_local_pc)
-		t_test = scipy.stats.ttest_ind(task_perf[np.argsort(diff)[len(diff)/2:]],task_perf[np.argsort(diff)[:len(diff)/2]])
-		diff_corr = nan_pearsonr(scipy.stats.zscore(task_perf),np.array(mean_pc)-np.array(mean_local_pc))
-		high_mod_corr = nan_pearsonr(task_perf,np.array(mean_pc))
-		low_mod_corr = nan_pearsonr(task_perf,np.array(mean_local_pc))
+			mean_wmd.append(np.nanmean(subject_wmds[s,wmd_predict_nodes]))
+			mean_local_wmd.append(np.nanmean(subject_wmds[s,wmd_local_predict_nodes]))
+		mean_pc = np.array(mean_pc)
+		mean_local_pc = np.array(mean_local_pc)
+		mean_wmd = np.array(mean_wmd)
+		mean_local_wmd = np.array(mean_local_wmd)
 
-		print 't test, median split, t:', str(np.round(t_test[0],3)), 'p:', str(np.round(t_test[1],3))
-		print 'Correlation between difference of connector and local PC scores, r:', str(np.round(diff_corr[0],3)), 'p:', str(np.round(diff_corr[1],3))
-		print 'Correlation between mean PC of Connector Nodes, r:', str(np.round(high_mod_corr[0],3)), 'p:', str(np.round(high_mod_corr[1],3))
-		print 'Correlation between mean PC of Local Nodes, r:', str(np.round(low_mod_corr[0],3)), 'p:', str(np.round(low_mod_corr[1],3))
+		pvals = np.array([mean_pc-mean_local_pc,mean_local_wmd-mean_wmd]).transpose()
+		mean_nodal_prediction = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			clf = linear_model.BayesianRidge()
+			clf.fit(pvals[train],task_perf[train])
+			mean_nodal_prediction.append(clf.predict(pvals[t]))
+		print 'Mean Nodal Prediction of Performance, LOO: ', pearsonr(np.array(mean_nodal_prediction).reshape(-1),task_perf)
 
-		array_len = len(diff)
-		str_list = np.chararray(array_len,itemsize=35)
-		str_list[:]= task
-		append_array = np.zeros((array_len,3)).astype(str)
-		append_array[:,0] = str_list
-		append_array[:,2] = scipy.stats.zscore(task_perf)[np.argsort(diff)]
-		append_array[:,1] = np.arange((array_len))[np.argsort(diff)].astype(str)
-		append_array[:,1][:array_len/2] = 'Locally Diverse'
-		append_array[:,1][array_len/2:] = 'Globally Diverse'
-		diff_df = diff_df.append(pd.DataFrame(data=append_array,columns=['Task','Modularity_Type','Performance']),ignore_index=True)
+		pvals = np.array([mean_pc-mean_local_pc]).transpose()
+		mean_pc_nodal_prediction = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			clf = linear_model.BayesianRidge()
+			clf.fit(pvals[train],task_perf[train])
+			mean_pc_nodal_prediction.append(clf.predict(pvals[t]))
+		print 'Mean PC Prediction of Performance, LOO: ', pearsonr(np.array(mean_pc_nodal_prediction).reshape(-1),task_perf)
+
+		pvals = np.array([mean_local_wmd,mean_wmd]).transpose()
+		mean_wmd_nodal_prediction = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			clf = linear_model.BayesianRidge()
+			clf.fit(pvals[train],task_perf[train])
+			mean_wmd_nodal_prediction.append(clf.predict(pvals[t]))
+		print 'Mean WMD Prediction of Performance, LOO: ', pearsonr(np.array(mean_wmd_nodal_prediction).reshape(-1),task_perf)
+
+		loo_array = []
+		for i in range(len(nodal_prediction)):
+			loo_array.append([task,nodal_prediction[i],q_performance_prediction[i],mean_nodal_prediction[i],mean_pc_nodal_prediction[i],mean_wmd_nodal_prediction[i],task_perf[i]])
+		loo_df = pd.concat([loo_df,pd.DataFrame(loo_array,columns=loo_columns)],axis=0)
+
+		# diff = np.array(mean_pc)-np.array(mean_local_pc)
+		# t_test = scipy.stats.ttest_ind(task_perf[np.argsort(diff)[len(diff)/2:]],task_perf[np.argsort(diff)[:len(diff)/2]])
+		# diff_corr = nan_pearsonr(task_perf,np.array(mean_pc)-np.array(mean_local_pc))
+		# high_mod_corr = nan_pearsonr(task_perf,np.array(mean_pc))
+		# low_mod_corr = nan_pearsonr(task_perf,np.array(mean_local_pc))
+
+		# print 't test, median split, t:', str(np.round(t_test[0],3)), 'p:', str(np.round(t_test[1],3))
+		# print 'Correlation between [difference of connector and local PC scores], Performance, r:', str(np.round(diff_corr[0],3)), 'p:', str(np.round(diff_corr[1],3))
+		# print 'Q, Performance, r:', pearsonr(subject_mods,task_perf)
+
+		# array_len = len(diff)
+		# str_list = np.chararray(array_len,itemsize=35)
+		# str_list[:]= task
+		# append_array = np.zeros((array_len,3)).astype(str)
+		# append_array[:,0] = str_list
+		# append_array[:,2] = scipy.stats.zscore(task_perf)[np.argsort(diff)]
+		# append_array[:,1] = np.arange((array_len))[np.argsort(diff)].astype(str)
+		# append_array[:,1][:array_len/2] = 'Locally Diverse'
+		# append_array[:,1][array_len/2:] = 'Globally Diverse'
+		# diff_df = diff_df.append(pd.DataFrame(data=append_array,columns=['Task','Modularity_Type','Performance']),ignore_index=True)
 		
-		str_list = np.chararray(len(task_perf),itemsize=10)
-		str_list[:]= task
-		task_perf_array = np.zeros((len(task_perf),3)).astype(str)
-		task_perf_array[:,0] = str_list
-		task_perf_array[:,1] = np.array(mean_pc) - np.array(mean_local_pc)
-		task_perf_array[:,2] = scipy.stats.zscore(task_perf)
-		task_perf_df = task_perf_df.append([task_perf_df,pd.DataFrame(task_perf_array,columns=task_perf_df_cols)],ignore_index=True)
-
+		# str_list = np.chararray(len(task_perf),itemsize=10)
+		# str_list[:]= task
+		# task_perf_array = np.zeros((len(task_perf),3)).astype(str)
+		# task_perf_array[:,0] = str_list
+		# task_perf_array[:,1] = np.array(mean_pc) - np.array(mean_local_pc)
+		# task_perf_array[:,2] = scipy.stats.zscore(task_perf)
+		# task_perf_df = task_perf_df.append([task_perf_df,pd.DataFrame(task_perf_array,columns=task_perf_df_cols)],ignore_index=True)
+		
+	
 	# colors = sns.color_palette(['#fdfd96','#C4D8E2'])
 	# sns.set(style="whitegrid", palette="pastel", color_codes=True)
 	# with sns.plotting_context("paper"):
@@ -975,7 +1179,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 	# 	sns.despine()
 	# 	plt.tight_layout()
 	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/task_performance.pdf',dpi=5600)
-	# 	plt.close()
+	# 	plt.show()
 
 	# sns.set(style="whitegrid", palette="pastel", color_codes=True)
 	# task_perf_df.Performance = task_perf_df.Performance.astype(float)
@@ -986,63 +1190,130 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 	# 	g = g.map(sns.regplot,'Modularity Increasing Diversity Value','Performance',scatter_kws={'alpha':.5})
 	# 	sns.despine()
 	# 	plt.tight_layout()
-		
 	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/task_performance_corr.pdf',dpi=3600)
 	# 	plt.show()
-	# 	plt.close()
+	sns.set_style("white")
+	sns.set_style("ticks")
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'WMD_Coefs','WCD',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/WCD_Perf_Coefs.pdf',dpi=3600)
+		plt.show()
 
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'PC_Coefs','PC',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_Perf_Coefs.pdf',dpi=3600)
+		plt.show()
 
-	for task in tasks:
-		print ' ' 
-		print task + ' Results'
-		print 'PCxPerformance, PC'
-		print nan_pearsonr(df.PCxPerformance[df.Task==task],df.PC[df.Task==task])
-		print 'PCxModularity, PC'
-		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PC[df.Task==task])
-		print 'PCxModularity, PCxPerformance'
-		print nan_pearsonr(df.PCxModularity[df.Task==task],df.PCxPerformance[df.Task==task])
-	#plot those results
-	# sns.set_style("white")
-	# sns.set_style("ticks")
-	# colors = np.array(sns.palettes.color_palette('Paired',6))
-	# with sns.plotting_context("paper",font_scale=1):
-	# 	g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
-	# 	g = g.map(sns.regplot,'PCxPerformance','PC',scatter_kws={'alpha':.95})
-	# 	sns.despine()
-	# 	plt.tight_layout()
-	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_PC_Performance.pdf',dpi=3600)
-	# 	plt.show()
-	# with sns.plotting_context("paper",font_scale=1):
-	# 	g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
-	# 	g = g.map(sns.regplot,'PCxPerformance','PCxModularity',scatter_kws={'alpha':.95})
-	# 	sns.despine()
-	# 	plt.tight_layout()
-	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_Modularity_PC_Performance.pdf',dpi=3600)
-	# 	plt.show()
-	
-	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
-	for task in tasks:
-		subjects = np.array(hcp_subjects).copy()
-		subjects = list(subjects)
-		subjects = remove_missing_subjects(subjects,task,'gordon')
-		test_reteset_task_performance(subjects,task)
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(loo_df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'Nodal Predicted Performance','Performance',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/Nodal_Predicted_Performance.pdf',dpi=3600)
+		plt.show()
 
-def c_elegans_rich_club():
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(loo_df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'Mean Nodal Predicted Performance','Performance',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/Mean_Nodal_Predicted_Performance.pdf',dpi=3600)
+		plt.show()
+
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(loo_df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'Mean PC Predicted Performance','Performance',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_Predicted_Performance.pdf',dpi=3600)
+		plt.show()
+
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(loo_df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'Mean WCD Predicted Performance','Performance',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/WCD_Predicted_Performance.pdf',dpi=3600)
+		plt.show()
+
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(loo_df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'Q Predicted Performance','Performance',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/Q_Predicted_Performance.pdf',dpi=3600)
+		plt.show()
+
+	sns.set_style("white")
+	sns.set_style("ticks")
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'PCxPerformance','PC',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_PC_Performance.pdf',dpi=3600)
+		plt.show()
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'PCxPerformance','PCxModularity',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/PC_Modularity_PC_Performance.pdf',dpi=3600)
+		plt.show()
+
+	sns.set_style("white")
+	sns.set_style("ticks")
+	colors = np.array(sns.palettes.color_palette('Paired',6))
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'WCDxPerformance','WCD',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/WCD_WCD_Performance.pdf',dpi=3600)
+		plt.show()
+	with sns.plotting_context("paper",font_scale=1):
+		g = sns.FacetGrid(df, col='Task', hue='Task',sharex=False,sharey=False,palette=colors[[0,2,4,5]],col_wrap=2)
+		g = g.map(sns.regplot,'WCDxPerformance','WCDxModularity',scatter_kws={'alpha':.95})
+		sns.despine()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/WDC_Modularity_WCD_Performance.pdf',dpi=3600)
+		plt.show()
+
+def c_elegans_rich_club(plt_mat=False):
 	worms = ['Worm1','Worm2','Worm3','Worm4']
 	for worm in worms:
-		matrix = np.array(pd.read_excel('pnas.1507110112.sd01.xls',sheetname=worm).corr())[4:,4:]
+		matrix = np.arctanh(np.array(pd.read_excel('pnas.1507110112.sd01.xls',sheetname=worm).corr())[4:,4:])
 		avg_pc_normalized_phis = []
 		avg_degree_normalized_phis = []
 		for cost in np.arange(5,21)*0.01:
 			temp_matrix = matrix.copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
+			if cost == .1:
+				if plt_mat == True:
+					np.fill_diagonal(matrix,0.0)
+					vc = graph.community_infomap(edge_weights='weight',trials=500)
+					plot_corr_matrix(matrix,vc.membership,return_array=False,out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_corr_mat.pdf'%(worm),label=False)
 			if graph.is_connected() == False:
 				continue
 			degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
 			average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(500)],axis=0)
 			degree_normalized_phis = degree_emperical_phis/average_randomized_phis
 			avg_degree_normalized_phis.append(degree_normalized_phis)
-			vc = graph.community_infomap(edge_weights='weight')
+			vc = graph.community_infomap(edge_weights='weight',trials=500)
 			pc = brain_graphs.brain_graph(vc).pc
 			pc[np.isnan(pc)] = 0.0
 			# if worm == 'Worm4':
@@ -1073,6 +1344,15 @@ def c_elegans_rich_club():
 			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(worm),dpi=3600)
 			plt.show()
 			plt.close()
+
+def plot_reordered_matrix(matrix,membership=None):
+	import matlab
+	eng = matlab.engine.start_matlab()
+	eng.addpath('/home/despoB/mb3152/brain_graphs/BCT/2016_01_16_BCT/')
+	r_matrix = eng.reorderMAT(matlab.double(matrix.tolist()),10,'line')
+	if type(membership) != 'NoneType':
+		membership = np.array(membership) + 1
+		m_matrix = eng.reorder_mod(r_matrix,matlab.double(membership.tolist()))
 
 def power_rich_club():
 	graph = Graph.Read_GML('power.gml')
@@ -1106,7 +1386,6 @@ def power_rich_club():
 		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_power.pdf',dpi=3600)
 		plt.show()
 
-
 def c_elegans_str_rich_club():
 	graph = Graph.Read_GML('celegansneural.gml')
 	graph.es["weight"] = np.ones(graph.ecount())
@@ -1138,7 +1417,6 @@ def c_elegans_str_rich_club():
 		plt.tight_layout()
 		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_structural.pdf',dpi=3600)
 		plt.show()
-
 
 def cat_and_macaque_rich_club(animal='cat'):
 	if animal == 'macaque':
@@ -1230,16 +1508,52 @@ def airlines_RC():
 	pc_normalized_phis = pc_emperical_phis/pc_average_randomized_phis
 	sns.set_style("white")
 	sns.set_style("ticks")
+	airports = pd.read_csv('airports.dat',header=None)
+	# with sns.plotting_context("paper",font_scale=1):	
+	# 	sns.tsplot(np.array(degree_normalized_phis)[:-10],color='b',condition='Degree',ci=99)
+	# 	sns.tsplot(np.array(pc_normalized_phis)[:-10],color='r',condition='PC',ci=99)
+	# 	plt.ylabel('Normalized Rich Club Coefficient')
+	# 	plt.xlabel('Rank')
+	# 	sns.despine()
+	# 	plt.legend()
+	# 	plt.tight_layout()
+	# 	plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_airports.pdf',dpi=3600)
+	# 	plt.show()
+	pc_int = []
+	degree_int = []
+	for i in range(2,1000):
+		num_int = 0
+		for i in range(1,i):
+		    if 'Intl' in airports[1][airports[0]==int(graph.vs['name'][np.argsort(pc)[-i]])].values[0]:
+		    	num_int = num_int + 1
+		print num_int
+		pc_int.append(num_int)
+		num_int = 0
+		for i in range(1,i):
+		    if 'Intl' in airports[1][airports[0]==int(graph.vs['name'][np.argsort(graph.strength(weights='weight'))[-i]])].values[0]:
+		    	num_int = num_int + 1
+		print num_int
+		degree_int.append(num_int)
 	with sns.plotting_context("paper",font_scale=1):	
-		sns.tsplot(np.array(degree_normalized_phis)[:-10],color='b',condition='Degree',ci=99)
-		sns.tsplot(np.array(pc_normalized_phis)[:-10],color='r',condition='PC',ci=99)
-		plt.ylabel('Normalized Rich Club Coefficient')
-		plt.xlabel('Rank')
+		sns.tsplot(degree_int,color='b',condition='Degree',ci=99)
+		sns.tsplot(pc_int,color='r',condition='PC',ci=99)
+		plt.ylabel('International Airports in Rich Club')
+		plt.xlabel('Airports')
 		sns.despine()
 		plt.legend()
 		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_airports.pdf',dpi=3600)
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_airports_int.pdf',dpi=3600)
 		plt.show()
+
+	longitudes = []
+	latitudes = []
+	for v in range(graph.vcount()):
+		latitudes.append(airports[6][airports[0]==int(graph.vs['name'][v])])
+		longitudes.append(airports[7][airports[0]==int(graph.vs['name'][v])])
+
+
+performance_across_tasks(atlas='power',tasks=[sys.argv[1]])
+
 """
 SGE Inputs
 """
