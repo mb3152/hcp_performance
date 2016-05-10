@@ -566,20 +566,21 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 
 
 		## Plot matrix of changes
-		# edge_thresh = 75
-		# edge_thresh = np.percentile(np.nanmean(matrices,axis=0),edge_thresh)
-		# pc_edge_corr[:,np.nanmean(matrices,axis=0)<edge_thresh,] = np.nan
-		# high_pc_edge_matrix = np.nanmean(pc_edge_corr[predict_nodes],axis=0)
-		# low_pc_edge_matrix = np.nanmean(pc_edge_corr[local_predict_nodes],axis=0)
-		# diff_pc_edge_matrix = np.diff([np.nanmean(pc_edge_corr[predict_nodes],axis=0),np.nanmean(pc_edge_corr[local_predict_nodes],axis=0)],axis=0).reshape((264,264))
-		# matrix = (np.tril(low_pc_edge_matrix) + np.triu(high_pc_edge_matrix)).reshape((264,264))
+		edge_thresh = 50
+		edge_thresh = np.percentile(np.nanmean(matrices,axis=0),edge_thresh)
+		pc_edge_corr[:,np.nanmean(matrices,axis=0)<edge_thresh,] = np.nan
+		high_pc_edge_matrix = np.nanmean(pc_edge_corr[predict_nodes],axis=0)
+		low_pc_edge_matrix = np.nanmean(pc_edge_corr[local_predict_nodes],axis=0)
+		diff_pc_edge_matrix = np.diff([np.nanmean(pc_edge_corr[predict_nodes],axis=0),np.nanmean(pc_edge_corr[local_predict_nodes],axis=0)],axis=0).reshape((264,264))
+		matrix = (np.tril(low_pc_edge_matrix) + np.triu(high_pc_edge_matrix)).reshape((264,264))
 		# all_matrices.append(matrix)
 
 		# plot_matrix = np.nanmean(all_matrices,axis=0)
-		# plot_matrix_mask = np.isnan(plot_matrix)
-		# zscores = scipy.stats.zscore(plot_matrix[plot_matrix_mask==False].reshape(-1))
-		# plot_matrix[plot_matrix_mask==False] = zscores
-		# plot_corr_matrix(plot_matrix,network_names.copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/wmd_corr_matrix_figure.pdf',plot_corr=True,return_array=False)
+		plot_matrix = matrix
+		plot_matrix_mask = np.isnan(plot_matrix)
+		zscores = scipy.stats.zscore(plot_matrix[plot_matrix_mask==False].reshape(-1))
+		plot_matrix[plot_matrix_mask==False] = zscores
+		plot_corr_matrix(plot_matrix,network_names.copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/pc_corr_matrix_%s.pdf'%(task),plot_corr=True,return_array=False)
 
 		edge_thresh = 75
 		edge_thresh = np.percentile(np.nanmean(matrices,axis=0),edge_thresh)
@@ -714,7 +715,7 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 	"""
 	atlas = 'power'
 	project='hcp'
-	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']
+	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
 	for task in tasks:
 		print task
@@ -727,7 +728,6 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		subject_mods = static_results['subject_mods']
 		subject_wmds = static_results['subject_wmds']
 		matrices = static_results['matrices']
-		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
 		#sum of weight changes for each node, by each node.
 		driver_nodes_list = ['connector_nodes','local_nodes']
 		mean_pc = np.nanmean(subject_pcs,axis=0)
@@ -738,6 +738,7 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
 		for i in range(subject_wmds.shape[1]):
 			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
+		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
 		connector_nodes = np.where(mod_pc_corr>0.0)[0]
 		local_nodes = np.where(mod_pc_corr<0.0)[0]
 		# pc_edge_corr = np.arctanh(pc_edge_correlation(subject_wmds,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(project,task,atlas)))
@@ -779,11 +780,11 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 			sns.set_style("ticks")
 			with sns.plotting_context("paper",font_scale=1):
 				sns.regplot(weight_matrix[weight_matrix!=0.0].reshape(-1),temp_matrix[weight_matrix!=0.0].reshape(-1),color='Black',scatter=True,scatter_kws={'alpha':.5},label = r)
-				plt.xlabel("Correlation (r) between node i's PC and j's within versus between network edge ratio")
+				plt.xlabel("Sum of r's, i's PC & j's within network edges - sum of r's, i's PC & j's between network edges")
 				plt.ylabel('Average edge weight between nodes i and j')
 				plt.legend(loc='best')
 				plt.tight_layout()
-				plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_%s_wvb_connectivity_%s.jpeg'%(task,str(driver_nodes)),dpi=3600)
+				plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_%s_wvb_connectivity_%s.pdf'%(task,str(driver_nodes)),dpi=3600)
 				plt.close()
 			1/0
 
@@ -1073,11 +1074,11 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 	project='hcp'
 	atlas='power'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels('power')
-	df = pd.DataFrame(columns=['PC','WCD','Task','PCxPerformance','PCxModularity','WCDxPerformance','WCDxModularity','PC_Coefs','WMD_Coefs'])
+	df = pd.DataFrame(columns=['PC','WCD','Task','PCxPerformance','PCxModularity','WCDxPerformance','WCDxModularity'])
 	diff_df = pd.DataFrame(columns=['Task','Modularity_Type','Performance'])
 	task_perf_df_cols = ['Task','Modularity Increasing Diversity Value','Performance']
 	task_perf_df = pd.DataFrame(columns=task_perf_df_cols)
-	loo_columns= ['Task','Nodal Predicted Performance','Q Predicted Performance','Mean Nodal Predicted Performance','Mean PC Predicted Performance','Mean WCD Predicted Performance','Performance']
+	loo_columns= ['Task','Nodal Predicted Performance','Q Predicted Performance','Mean Nodal Predicted Performance','Mean PC Predicted Performance','Mean WCD Predicted Performance','Performance','Mod Diff','PC Q+ Diff','WCD Q+ Diff','PC Q+/Q- Diff','WCD Q+/Q- Diff','Q Diff Performance Prediction']
 	loo_df = pd.DataFrame(columns = loo_columns)
 	for task in tasks:
 		"""
@@ -1135,21 +1136,6 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		"""
 		predict performance using high and low PCS values. 
 		"""
-		predict_c = []
-		idx = np.triu_indices(264,1)
-		for m in matrices:
-			predict_c.append(m[idx])
-		predict_c = np.array(predict_c)
-		predict_c = predict_c.reshape(matrices.shape[0],-1)
-		predict_wvb = np.zeros((len(task_perf),264))
-		for s in range(len(task_perf)):
-			for i in range(264):
-				for j in range(264):
-					if known_membership[i] == known_membership[j]:
-						predict_wvb[s,i] = predict_wvb[s,i] + matrices[s,i,j]
-					else:
-						predict_wvb[s,i] = predict_wvb[s,i] - matrices[s,i,j]
-		
 		if task != 'REST':
 			to_delete = np.isnan(task_perf).copy()
 			to_delete = np.where(to_delete==True)
@@ -1160,8 +1146,6 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			subject_mods = np.delete(subject_mods,to_delete)
 			subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
 			task_perf = np.delete(task_perf,to_delete)
-			predict_c = np.delete(predict_c,to_delete,axis=0)
-			predict_wvb = np.delete(predict_wvb,to_delete,axis=0)
 		task_perf = scipy.stats.zscore(task_perf)
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
 		rest_subject_pcs[np.isnan(rest_subject_pcs)] = 0.0
@@ -1174,39 +1158,101 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			pvals = v[0]
 			train = v[1] 
 			t = v[2]
-			task_perf =v[3] 
-			train = np.ones(len(pvals)).astype(bool)
+			task_perf = v[3] 
+			train = np.ones(len(train)).astype(bool)
 			train[t] = False
 			clf = linear_model.LinearRegression()
 			clf.fit(pvals[train],task_perf[train])
 			return clf.predict(pvals[t])
 
-		# pvals = np.concatenate([subject_pcs,subject_wmds,predict_wvb],axis=1)
+		pvals = np.concatenate([subject_pcs,subject_wmds],axis=1)
+		vs = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			vs.append([pvals,train,t,task_perf])
+		pool = Pool(20)
+		nodal_prediction = pool.map(predict,vs)
+		print 'Nodal (PC and WMD scores) Prediction of Performance, LOO: ', pearsonr(nodal_prediction,task_perf)
+		mod_diff = subject_mods - rest_subject_mods
+		# pvals = np.array(subject_mods - rest_subject_mods)
+		# pvals = pvals.reshape(pvals.shape[0],1)
 		# vs = []
 		# for t in range(pvals.shape[0]):
 		# 	train = np.ones(len(pvals)).astype(bool)
 		# 	train[t] = False
 		# 	vs.append([pvals,train,t,task_perf])
 		# pool = Pool(20)
-		# nodal_prediction = pool.map(predict,vs) 
-		# print 'Nodal Prediction of Performance, LOO: ', pearsonr(nodal_prediction,task_perf)
+		# q_diff_prediction = pool.map(predict,vs)
+		q_diff_prediction = np.array(subject_mods - rest_subject_mods)
+		print 'Q Difference Prediction of Performance: ', pearsonr(q_diff_prediction,task_perf)
 
-		pvals = subject_mods - rest_subject_mods
+		# pvals = np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1)
+		# pvals = pvals.reshape(pvals.shape[0],1)
+		# vs = []
+		# for t in range(pvals.shape[0]):
+		# 	train = np.ones(len(pvals)).astype(bool)
+		# 	train[t] = False
+		# 	vs.append([pvals,train,t,task_perf])
+		# pool = Pool(20)
+		# q_plus_pc_diff_prediction = pool.map(predict,vs) 
+		q_plus_pc_diff_prediction = np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1)
+		print 'Q Plus PC Difference Prediction of Performance: ', pearsonr(q_plus_pc_diff_prediction,task_perf)
+
+		# pvals = np.nanmean(subject_wmds[:,local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,local_predict_nodes],axis=1)
+		# pvals = pvals.reshape(pvals.shape[0],1)
+		# vs = []
+		# for t in range(pvals.shape[0]):
+		# 	train = np.ones(len(pvals)).astype(bool)
+		# 	train[t] = False
+		# 	vs.append([pvals,train,t,task_perf])
+		# pool = Pool(20)
+		# q_plus_wmd_diff_prediction = pool.map(predict,vs) 
+		q_plus_wmd_diff_prediction = np.nanmean(subject_wmds[:,local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,local_predict_nodes],axis=1)
+		print 'Q Plus WMD Difference Prediction of Performance: ', pearsonr(q_plus_wmd_diff_prediction,task_perf)
+
+		# pvals = np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1)
+		# pvals = pvals.reshape(pvals.shape[0],1)
+		# vs = []
+		# for t in range(pvals.shape[0]):
+		# 	train = np.ones(len(pvals)).astype(bool)
+		# 	train[t] = False
+		# 	vs.append([pvals,train,t,mod_diff])
+		# pool = Pool(20)
+		# q_plus_pc_mod_diff_prediction = pool.map(predict,vs)
+		q_plus_pc_mod_prediction = np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1)
+		print 'Q Plus PC Difference Prediction of Mod Diff: ', pearsonr(q_plus_pc_mod_prediction,mod_diff)
+
+		# pvals = np.nanmean(subject_wmds[:,local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,local_predict_nodes],axis=1)
+		# pvals = pvals.reshape(pvals.shape[0],1)
+		# vs = []
+		# for t in range(pvals.shape[0]):
+		# 	train = np.ones(len(pvals)).astype(bool)
+		# 	train[t] = False
+		# 	vs.append([pvals,train,t,mod_diff])
+		# pool = Pool(20)
+		# q_plus_wmd_mod_diff_prediction = pool.map(predict,vs) 
+		q_plus_wmd_mod_prediction = np.nanmean(subject_wmds[:,local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,local_predict_nodes],axis=1)
+		print 'Q Plus WMD Difference Prediction of Mod Diff: ', pearsonr(q_plus_wmd_mod_diff_prediction,mod_diff)
+
+		# pvals = subject_mods - rest_subject_mods
+		# print 'Rest Q versus Task Q | Performance', pearsonr(pvals,task_perf)
+		# print 'Q+ PC Rest V Task, Performance', pearsonr(task_perf,np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1))
+		# print 'Q+ WCD Rest V Task, Performance', pearsonr(task_perf,np.nanmean(subject_wmds[:,wmd_local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,wmd_local_predict_nodes],axis=1))
+		# print 'Q+ PC Rest V Task, Modularity Rest V Task', pearsonr(pvals,np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1))
+		# print 'Q+ WCD Rest V Task, Modularity Rest V Task',pearsonr(pvals,np.nanmean(subject_wmds[:,wmd_local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,wmd_local_predict_nodes],axis=1))
 		px = np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1)
 		py = np.nanmean(subject_pcs[:,local_predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,local_predict_nodes],axis=1)
 		wx = np.nanmean(subject_wmds[:,wmd_local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,wmd_local_predict_nodes],axis=1)
 		wy = np.nanmean(subject_wmds[:,wmd_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,wmd_predict_nodes],axis=1)
-
-		print 'Rest Q versus Task Q | Performance', pearsonr(pvals,task_perf)
-		print 'Q+ PC Rest V Task, Performance', pearsonr(task_perf,np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1))
-		print 'Q+ WCD Rest V Task, Performance', pearsonr(task_perf,np.nanmean(subject_wmds[:,wmd_local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,wmd_local_predict_nodes],axis=1))
-		print 'Q+ PC Rest V Task, Modularity Rest V Task', pearsonr(pvals,np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1))
-		print 'Q+ WCD Rest V Task, Modularity Rest V Task',pearsonr(pvals,np.nanmean(subject_wmds[:,wmd_local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,wmd_local_predict_nodes],axis=1))
-		# print 'PC, Q+/Q- Ratio Rest V Task, Performance', pearsonr(task_perf,px-py)
-		# print 'WCD, Q+/Q- Ratio Rest V Task, Performance', pearsonr(task_perf,wx-wy)
-		# print 'PC, Q+/Q- Ratio Rest V Task, Modularity Rest V Task', pearsonr(pvals,px-py)
-		# print 'WCD, Q+/Q- Ratio Rest V Task, Modularity Rest V Task',pearsonr(pvals,wx-wy)
-
+		
+		print 'PC, Q+/Q- Ratio Rest V Task, Performance', pearsonr(task_perf,px-py)
+		print 'WCD, Q+/Q- Ratio Rest V Task, Performance', pearsonr(task_perf,wx-wy)
+		print 'PC, Q+/Q- Ratio Rest V Task, Modularity Rest V Task', pearsonr(mod_diff,px-py)
+		print 'WCD, Q+/Q- Ratio Rest V Task, Modularity Rest V Task',pearsonr(mod_diff,wx-wy)
+		
+		q_plus_pc_mod_diff_prediction  = px-py
+		q_plus_wmd_mod_diff_prediction  = wx-wy
 		pvals = np.zeros((len(wx),5))
 		pvals[:,0] = px-py
 		pvals[:,1] = wx-wy
@@ -1219,38 +1265,23 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			train[t] = False
 			vs.append([pvals,train,t,task_perf])
 		pool = Pool(20)
-		nodal_prediction = pool.map(predict,vs)
-		print 'Rest Task Difference (5 Feats) Prediction of Performance, LOO: ', pearsonr(nodal_prediction,task_perf)
+		five_feat = pool.map(predict,vs)
+		print 'Rest Task Difference (5 Feats) Prediction of Performance, LOO: ', pearsonr(five_feat,task_perf)
 
-		pvals = np.concatenate([subject_pcs,subject_wmds],axis=1)
+		pvals = subject_mods
+		pvals = pvals.reshape(pvals.shape[0],1)
 		vs = []
 		for t in range(pvals.shape[0]):
 			train = np.ones(len(pvals)).astype(bool)
 			train[t] = False
 			vs.append([pvals,train,t,task_perf])
 		pool = Pool(20)
-		nodal_prediction = pool.map(predict,vs)	
-		print 'Nodal (PC and WMD scores) Prediction of Performance, LOO: ', pearsonr(nodal_prediction,task_perf)
-
-		q_performance_prediction = []
-		for t in range(pvals.shape[0]):
-			train = np.ones(len(pvals)).astype(bool)
-			train[t] = False
-			clf = linear_model.LinearRegression()
-			clf.fit(subject_mods.reshape(len(subject_mods),1)[train],task_perf[train])
-			q_performance_prediction.append(clf.predict(subject_mods[t]))
+		q_performance_prediction = pool.map(predict,vs)
 		print 'Q Prediction of Performance, LOO: ', pearsonr(np.array(q_performance_prediction).reshape(-1),task_perf)
-
-		# pvals = np.concatenate([subject_pcs,subject_wmds],axis=1)
-		# clf = linear_model.LinearRegression()
-		# clf.fit(pvals,task_perf)
-		# print 'PC Prediction of Performance: ', pearsonr(clf.predict(pvals),task_perf)
-		# print 'WMD, Coefficients of Performance', pearsonr(np.nanmean(subject_wmds,axis=0),clf.coef_[264:])
-		# print 'PC, Coefficients of Performance', pearsonr(np.nanmean(subject_pcs,axis=0),clf.coef_[:264])
 		
-		# for node in range(subject_pcs.shape[1]):
-		# 	df_array.append([np.nanmean(subject_pcs,axis=0)[node],np.nanmean(subject_wmds,axis=0)[node],task,nan_pearsonr(subject_pcs[:,node],task_perf)[0],mod_pc_corr[node],nan_pearsonr(subject_wmds[:,node],task_perf)[0],mod_wmd_corr[node],clf.coef_[node],clf.coef_[node*2]])
-		# df = pd.concat([df,pd.DataFrame(df_array,columns=['PC','WCD','Task','PCxPerformance','PCxModularity','WCDxPerformance','WCDxModularity','PC_Coefs','WMD_Coefs'])],axis=0)		
+		for node in range(subject_pcs.shape[1]):
+			df_array.append([np.nanmean(subject_pcs,axis=0)[node],np.nanmean(subject_wmds,axis=0)[node],task,nan_pearsonr(subject_pcs[:,node],task_perf)[0],mod_pc_corr[node],nan_pearsonr(subject_wmds[:,node],task_perf)[0],mod_wmd_corr[node]])
+		df = pd.concat([df,pd.DataFrame(df_array,columns=['PC','WCD','Task','PCxPerformance','PCxModularity','WCDxPerformance','WCDxModularity'])],axis=0)		
 
 		mean_pc = []
 		mean_local_pc = []
@@ -1267,38 +1298,47 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		mean_local_wmd = np.array(mean_local_wmd)
 
 		pvals = np.array([mean_pc-mean_local_pc,mean_local_wmd-mean_wmd]).transpose()
-		mean_nodal_prediction = []
+		vs = []
 		for t in range(pvals.shape[0]):
 			train = np.ones(len(pvals)).astype(bool)
 			train[t] = False
-			clf = linear_model.LinearRegression()
-			clf.fit(pvals[train],task_perf[train])
-			mean_nodal_prediction.append(clf.predict(pvals[t]))
+			vs.append([pvals,train,t,task_perf])
+		pool = Pool(20)
+		mean_nodal_prediction = pool.map(predict,vs)
 		print 'Mean Nodal Prediction of Performance, LOO: ', pearsonr(np.array(mean_nodal_prediction).reshape(-1),task_perf)
 
-		# pvals = np.array([mean_pc-mean_local_pc]).transpose()
-		# mean_pc_nodal_prediction = []
-		# for t in range(pvals.shape[0]):
-		# 	train = np.ones(len(pvals)).astype(bool)
-		# 	train[t] = False
-		# 	clf = linear_model.LinearRegression()
-		# 	clf.fit(pvals[train],task_perf[train])
-		# 	mean_pc_nodal_prediction.append(clf.predict(pvals[t]))
-		# print 'Mean PC Prediction of Performance, LOO: ', pearsonr(np.array(mean_pc_nodal_prediction).reshape(-1),task_perf)
+		pvals = np.array([px-py,wx-wy]).transpose()
+		vs = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			vs.append([pvals,train,t,task_perf])
+		pool = Pool(20)
+		mean_nodal_prediction_diff = pool.map(predict,vs)
+		print 'Mean Nodal Difference Prediction of Performance, LOO: ', pearsonr(np.array(mean_nodal_prediction_diff).reshape(-1),task_perf)
 
-		# pvals = np.array([mean_local_wmd,mean_wmd]).transpose()
-		# mean_wmd_nodal_prediction = []
-		# for t in range(pvals.shape[0]):
-		# 	train = np.ones(len(pvals)).astype(bool)
-		# 	train[t] = False
-		# 	clf = linear_model.LinearRegression()
-		# 	clf.fit(pvals[train],task_perf[train])
-		# 	mean_wmd_nodal_prediction.append(clf.predict(pvals[t]))
-		# print 'Mean WMD Prediction of Performance, LOO: ', pearsonr(np.array(mean_wmd_nodal_prediction).reshape(-1),task_perf)
+		pvals = np.array([mean_pc-mean_local_pc]).transpose()
+		vs = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			vs.append([pvals,train,t,task_perf])
+		pool = Pool(20)
+		mean_pc_nodal_prediction = pool.map(predict,vs)
+		print 'Mean PC Prediction of Performance, LOO: ', pearsonr(np.array(mean_pc_nodal_prediction).reshape(-1),task_perf)
 
+		pvals = np.array([mean_local_wmd-mean_wmd]).transpose()
+		vs = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			vs.append([pvals,train,t,task_perf])
+		pool = Pool(20)
+		mean_wmd_nodal_prediction = pool.map(predict,vs)
+		print 'Mean WMD Prediction of Performance, LOO: ', pearsonr(np.array(mean_wmd_nodal_prediction).reshape(-1),task_perf)
 		loo_array = []
 		for i in range(len(nodal_prediction)):
-			loo_array.append([task,nodal_prediction[i],q_performance_prediction[i],mean_nodal_prediction[i],mean_pc_nodal_prediction[i],mean_wmd_nodal_prediction[i],task_perf[i]])
+			loo_array.append([task,nodal_prediction[i],q_performance_prediction[i],mean_nodal_prediction[i],mean_pc_nodal_prediction[i],mean_wmd_nodal_prediction[i],task_perf[i],mod_diff[i],q_plus_pc_mod_prediction[i],q_plus_wmd_mod_prediction[i].q_plus_pc_mod_diff_prediction[i],q_plus_wmd_mod_diff_prediction[i],q_diff_prediction[i]])
 		loo_df = pd.concat([loo_df,pd.DataFrame(loo_array,columns=loo_columns)],axis=0)
 
 		# diff = np.array(mean_pc)-np.array(mean_local_pc)
