@@ -255,7 +255,36 @@ def individual_graph_analyes(variables):
 		del graph
 	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0),subject)
 
-def check_normalize(subjects,task,atlas='power'):
+def check_num_nodes(subjects,task,atlas='power'):
+	mods = []
+	num_nodes = []
+	for subject in subjects:
+		smods = []
+		snum_nodes = []
+		print subject
+		s_matrix = []
+		files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
+		for f in files:
+			f = np.load(f)
+			np.fill_diagonal(f,0.0)
+			f[np.isnan(f)] = 0.0
+			f = np.arctanh(f)
+			s_matrix.append(f.copy())
+		if len(s_matrix) == 0:
+			continue
+		s_matrix = np.nanmean(s_matrix,axis=0)
+		for cost in np.array(range(5,16))*0.01:
+			temp_matrix = s_matrix.copy()
+			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
+			del temp_matrix
+			graph = graph.community_infomap(edge_weights='weight')
+			smods.append(graph.modularity)
+			snum_nodes.append(len(np.array(graph.graph.degree())[np.array(graph.graph.degree())>0.0]))
+		mods.append(np.mean(smods))
+		num_nodes.append(np.mean(snum_nodes))
+		print pearsonr(mods,num_nodes)
+
+def check_normalize(subjects,task,atlas='power'):	
 	for subject in subjects:
 		print subject
 		s_matrix = []
@@ -273,7 +302,7 @@ def check_normalize(subjects,task,atlas='power'):
 			temp_matrix = s_matrix.copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
 			assert np.diff([cost,graph.density()])[0] < .005
-			print 'okay'
+			assert np.min(graph.get_adjacency(attribute='weight').data) >= 0.0
 
 def graph_metrics(subjects,task,atlas,project='hcp',run_version='fz',run=False):
 	"""
@@ -375,13 +404,62 @@ def network_labels(atlas):
 		name_int_dict[int_value] = name
 	return known_membership,network_names,len(known_membership),name_int_dict
 
+def split_connectivity_across_tasks(n_iters=10000):
+	global hcp_subjects
+	try:
+		df = pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/split_corrs.csv')
+	except:
+		split = True
+		tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
+		project='hcp'
+		atlas = 'power'
+		known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
+		df_columns=['Task','Pearson R, PC, PC & Q','Pearson R, WCD, WCD & Q']
+		df = pd.DataFrame(columns = df_columns)
+		for task in tasks:
+			print task
+			subjects = np.array(hcp_subjects).copy()
+			subjects = list(subjects)
+			subjects = remove_missing_subjects(subjects,task,atlas)
+			assert (subjects == np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))).all()
+			static_results = graph_metrics(subjects,task,atlas)
+			subject_pcs = static_results['subject_pcs']
+			subject_mods = static_results['subject_mods']
+			subject_wmds = static_results['subject_wmds']
+			matrices = static_results['matrices']
+			task_perf = task_performance(subjects,task)
+			assert subject_pcs.shape[0] == len(subjects)
+			wmd_rs = []
+			pc_rs = []
+			from sklearn.cross_validation import ShuffleSplit
+			for pc_subs,pc_mod_subjects in ShuffleSplit(n=len(subjects),n_iter=n_iters,train_size=.5,test_size=.5):
+				mod_pc_corr = np.zeros(subject_pcs.shape[1])
+				mod_wmd_corr = np.zeros(subject_pcs.shape[1])
+				mean_pc = np.nanmean(subject_pcs[pc_subs,],axis=0)
+				mean_wmd = np.nanmean(subject_wmds[pc_subs,],axis=0)
+				for i in range(subject_pcs.shape[1]):
+					mod_pc_corr[i] = nan_pearsonr(subject_mods[pc_mod_subjects],subject_pcs[pc_mod_subjects,i])[0]
+					mod_wmd_corr[i] = nan_pearsonr(subject_mods[pc_mod_subjects],subject_wmds[pc_mod_subjects,i])[0]
+				df = df.append({'Task':task,'Pearson R, PC, PC & Q':nan_pearsonr(mod_pc_corr,mean_pc)[0],'Pearson R, WCD, WCD & Q':nan_pearsonr(mod_wmd_corr,mean_wmd)[0]},ignore_index=True)
+			print np.mean(df['Pearson R, PC, PC & Q'][df.Task==task])
+			print np.mean(df['Pearson R, WCD, WCD & Q'][df.Task==task])
+		df.to_csv('/home/despoB/mb3152/dynamic_mod/results/split_corrs.csv')
+	sns.plt.figure(figsize=(20,10))
+	sns.violinplot(data=df,y='Pearson R, PC, PC & Q',x='Task',inner='quartile')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/split_pc.pdf',dpi=3600)
+	sns.plt.close()
+	sns.violinplot(data=df,y='Pearson R, WCD, WCD & Q',x='Task',inner='quartile')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/split_wcd.pdf',dpi=3600)
+	sns.plt.close()
+
 def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']):
 	global hcp_subjects
+	split = True
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	project='hcp'
 	atlas = 'power'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
-	df_columns=['PC','WCD','Task','Pearson R, PC & Q','Pearson R, WCD & Q','PC-Q Coefficients','WMD-Q Coefficients']
+	df_columns=['PC','WCD','Task','Pearson R, PC & Q','Pearson R, WCD & Q','PC-Q Coefficients','WMD-Q Coefficients','PC_Q+','WCD_Q+']
 	df = pd.DataFrame(columns = df_columns)
 	loo_columns=['Task','Predicted Q','Q']
 	loo_df = pd.DataFrame(columns = loo_columns)
@@ -398,24 +476,14 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		matrices = static_results['matrices']
 		task_perf = task_performance(subjects,task)
 		assert subject_pcs.shape[0] == len(subjects)
-		if split == True:
-			mean_pc = np.nanmean(subject_pcs[:250,],axis=0)
-			mean_wmd = np.nanmean(subject_wmds[:250,],axis=0)
-		else:
-			mean_pc = np.nanmean(subject_pcs,axis=0)
-			mean_wmd = np.nanmean(subject_wmds,axis=0)
+		mean_pc = np.nanmean(subject_pcs,axis=0)
+		mean_wmd = np.nanmean(subject_wmds,axis=0)
 		mod_pc_corr = np.zeros(subject_pcs.shape[1])
 		for i in range(subject_pcs.shape[1]):
-			if split == True:
-				mod_pc_corr[i] = nan_pearsonr(subject_mods[:250],subject_pcs[:250,i])[0]
-			else:
-				mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
 		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
 		for i in range(subject_wmds.shape[1]):
-			if split == True:
-				mod_wmd_corr[i] = nan_pearsonr(subject_mods[:250],subject_wmds[:250,i])[0]
-			else:
-				mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
+			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
 		print 'Pearson R, PC & Q, Mean PC: ', nan_pearsonr(mod_pc_corr,mean_pc)
 		print 'Pearson R, PC & WCD, Mean WMD: ', nan_pearsonr(mod_wmd_corr,mean_wmd)
 		assert (mod_pc_corr==0).all() == False
@@ -425,6 +493,8 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		for s in range(subject_pcs.shape[0]):
 			high_pc_mod.append(np.nanmean(subject_pcs[s][np.where(mod_pc_corr>0)])-np.nanmean(subject_pcs[s][np.where(mod_pc_corr<0)]))
 			high_wcd_mod.append(np.nanmean(subject_wmds[s][np.where(mod_wmd_corr>0)])-np.nanmean(subject_wmds[s][np.where(mod_wmd_corr<0)]))
+			# high_pc_mod.append(np.nanmean(subject_pcs[s][np.where(mod_pc_corr>0)]))
+			# high_wcd_mod.append(np.nanmean(subject_wmds[s][np.where(mod_wmd_corr>0)]))
 		print 'Pearson R, PC Q+, WCD Q+: ', pearsonr(high_pc_mod,high_wcd_mod)
 
 		pc_vals = subject_pcs.copy()
@@ -439,51 +509,77 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 		print 'PC, Coefficients of Q', pearsonr(mean_wmd,clf.coef_[:264])
 		df_array = []
 		for node in range(num_nodes):
-			df_array.append([mean_pc[node],mean_wmd[node],task,mod_pc_corr[node],mod_wmd_corr[node],clf.coef_[264+node],clf.coef_[node]])
+			df_array.append([mean_pc[node],mean_wmd[node],task,mod_pc_corr[node],mod_wmd_corr[node],clf.coef_[264+node],clf.coef_[node],high_pc_mod[node],high_wcd_mod[node]])
 		df = pd.concat([df,pd.DataFrame(df_array,columns=df_columns)],axis=0)
 
-		vs = []
-		for t in range(pvals.shape[0]):
-			train = np.ones(len(pvals)).astype(bool)
-			train[t] = False
-			vs.append([pvals,train,t,subject_mods])
-		pool = Pool(20)
-		q_prediction = pool.map(predict,vs)		
-		print 'Nodal Role Prediction of Q, LOO: ', pearsonr(q_prediction,subject_mods)
-		loo_array = []
-		for i in range(len(q_prediction)):
-			loo_array.append([task,q_prediction[i],subject_mods[i]])
-		loo_df = pd.concat([loo_df,pd.DataFrame(loo_array,columns=loo_columns)],axis=0)
+		# vs = []
+		# for t in range(pvals.shape[0]):
+		# 	train = np.ones(len(pvals)).astype(bool)
+		# 	train[t] = False
+		# 	vs.append([pvals,train,t,subject_mods])
+		# pool = Pool(20)
+		# q_prediction = pool.map(predict,vs)		
+		# print 'Nodal Role Prediction of Q, LOO: ', pearsonr(q_prediction,subject_mods)
+		# loo_array = []
+		# for i in range(len(q_prediction)):
+		# 	loo_array.append([task,q_prediction[i],subject_mods[i]])
+		# loo_df = pd.concat([loo_df,pd.DataFrame(loo_array,columns=loo_columns)],axis=0)
 		# # make brain figures
-		# import matlab
-		# eng = matlab.engine.start_matlab()
-		# eng.addpath('/home/despoB/mb3152/BrainNet/')
-		# write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-		# pcs = np.nanmean(subject_pcs,axis=0)
-		# write_df[3] = pcs
-		# write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task),sep='\t',index=False,names=False,header=False)
-		# node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task)
-		# surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
-		# img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/figure_2_pc_%s.png' %(task)
-		# configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
-		# eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
-		# #mod pc values
-		# write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
-		# write_df[3] = mod_pc_corr
-		# maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2.75)
-		# minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2.75)
-		# write_df[3][mod_pc_corr > maxv] = maxv
-		# write_df[3][mod_pc_corr < minv] = minv
-		# write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)			
-		# node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task)
-		# surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
-		# img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/figure_2_mod_pc_corr_%s.png' %(task)
-		# configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
-		# eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
+		import matlab
+		eng = matlab.engine.start_matlab()
+		eng.addpath('/home/despoB/mb3152/BrainNet/')
+		# pc values
+		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		pcs = np.nanmean(subject_pcs,axis=0)
+		write_df[3] = pcs
+		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task),sep='\t',index=False,names=False,header=False)
+		node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_%s.node'%(task)
+		surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+		img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/pc_%s.png' %(task)
+		configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
+		eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
+		#mod pc values
+		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		write_df[3] = mod_pc_corr
+		maxv = np.nanmean(mod_pc_corr) + (np.nanstd(mod_pc_corr)*2.75)
+		minv = np.nanmean(mod_pc_corr) - (np.nanstd(mod_pc_corr)*2.75)
+		write_df[3][mod_pc_corr > maxv] = maxv
+		write_df[3][mod_pc_corr < minv] = minv
+		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)			
+		node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_pc_mod_%s.node'%(task)
+		surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+		img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/mod_pc_corr_%s.png' %(task)
+		configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
+		eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
+		# wcd values
+		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		wmds = np.nanmean(subject_wmds,axis=0)
+		write_df[3] = wmds
+		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_wmds_%s.node'%(task),sep='\t',index=False,names=False,header=False)
+		node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_wmds_%s.node'%(task)
+		surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+		img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/wmds_%s.png' %(task)
+		configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
+		eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
+		#mod wcd values
+		write_df = pd.read_csv('/home/despoB/mb3152/BrainNet/Data/ExampleFiles/Power264/Node_Power264.node',header=None,sep='\t')
+		write_df[3] = mod_wmd_corr
+		maxv = np.nanmean(mod_wmd_corr) + (np.nanstd(mod_wmd_corr)*2.75)
+		minv = np.nanmean(mod_wmd_corr) - (np.nanstd(mod_wmd_corr)*2.75)
+		write_df[3][mod_wmd_corr > maxv] = maxv
+		write_df[3][mod_wmd_corr < minv] = minv
+		write_df.to_csv('/home/despoB/mb3152/dynamic_mod/brain_figures/power_wmd_mod_%s.node'%(task),sep='\t',index=False,names=False,header=False)			
+		node_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/power_wmd_mod_%s.node'%(task)
+		surf_file = '/home/despoB/mb3152/BrainNet/Data/SurfTemplate/BrainMesh_ICBM152_smoothed.nv'
+		img_file = '/home/despoB/mb3152/dynamic_mod/brain_figures/mod_wmd_corr_%s.png' %(task)
+		configs = '/home/despoB/mb3152/BrainNet/pc_values.mat'
+		eng.BrainNet_MapCfg(node_file,surf_file,configs,img_file)
+
 	if split == True:
 		plot_connectivity_results(df,'PC','Pearson R, PC & Q','/home/despoB/mb3152/dynamic_mod/figures/PCxPCxModularity_split.pdf')
 		plot_connectivity_results(df,'WCD','Pearson R, WCD & Q','/home/despoB/mb3152/dynamic_mod/figures/WCDxWCDxModularity_split.pdf')
 		1/0
+	plot_connectivity_results(df,'PC_Q+','WCD_Q+','/home/despoB/mb3152/dynamic_mod/figures/PC_QplusxWCD_Qplus.pdf')
 	plot_connectivity_results(loo_df,'Predicted Q','Q','/home/despoB/mb3152/dynamic_mod/figures/WMD_PC_Q_Prediction.pdf')
 	plot_connectivity_results(df,'PC','PC-Q Coefficients','/home/despoB/mb3152/dynamic_mod/figures/PC-Q_Coefs.pdf')
 	plot_connectivity_results(df,'WCD','WMD-Q Coefficients','/home/despoB/mb3152/dynamic_mod/figures/WMD-Q_Coefs.pdf')
@@ -491,8 +587,6 @@ def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL
 	plot_connectivity_results(df,'PC','Pearson R, PC & Q','/home/despoB/mb3152/dynamic_mod/figures/PCxPCxModularity.pdf')
 	plot_connectivity_results(df,'WCD','Pearson R, WCD & Q','/home/despoB/mb3152/dynamic_mod/figures/WCDxWCDxModularity.pdf')
 	plot_connectivity_results(df,'WCD','PC','/home/despoB/mb3152/dynamic_mod/figures/WMDxPC.pdf')
-
-
 
 def matrix_of_changes():
 	"""
@@ -790,8 +884,6 @@ def attack(graph):
 	pc = vc.pc
 	pc[np.isnan(pc)] = 0.0
 	deg = np.array(vc.community.graph.strength(weights='weight'))
-	attack_degree_sps = []
-	attack_pc_sps = []
 	cmask = brain_graphs.community_matrix(vc.community.membership,0).astype(bool)
 	nidx = graph.vcount()/5
 	connector_nodes = np.argsort(pc)[-nidx:]
@@ -808,69 +900,44 @@ def attack(graph):
 	connector_edges = np.array(connector_edges)
 	degree_edges = np.array(degree_edges)
 	idx = 0
-	cbreaks = 0
-	dbreaks = 0
+	de = len(connector_edges)
+	dmin = de - (de/10)
+	dmax = de - (de/2)
+	attack_degree_sps = []
+	attack_pc_sps = []
 	while True:
-		num_kill = np.random.choice(range(len(degree_edges)/2,len(degree_edges),1))
+		num_kill = np.random.choice((dmin,dmax),1)
 		np.random.shuffle(degree_edges)
-		edges = degree_edges[:num_kill]
-		c_graph = graph.copy()
-		delete_edges = []
-		for node1,node2 in edges.reshape(edges.shape[0],2):
-			delete_edges.append(graph.get_eid(node1,node2))
-		c_graph.delete_edges(delete_edges)
-		if c_graph.is_connected() == False:
-				dbreaks = dbreaks + 1
-				break
-		deg_sp = np.array(c_graph.shortest_paths()).astype(float)
-		attack_degree_sps.append(np.nansum(deg_sp))
-		idx = idx + 1
-		if idx == 100:
-			break
-	idx = 0
-	while True:
-		num_kill = num_kill = np.random.choice(range(len(connector_edges)/2,len(connector_edges),1))
 		np.random.shuffle(connector_edges)
-		edges = connector_edges[:num_kill]
+		d_edges = degree_edges[:num_kill]
+		c_edges = connector_edges[:num_kill]
+		d_graph = graph.copy()
 		c_graph = graph.copy()
 		delete_edges = []
-		for node1,node2 in edges.reshape(edges.shape[0],2):
+		for node1,node2 in d_edges.reshape(d_edges.shape[0],2):
+			delete_edges.append(graph.get_eid(node1,node2))
+		d_graph.delete_edges(delete_edges)
+		if d_graph.is_connected() == False:
+				break
+		delete_edges = []
+		for node1,node2 in c_edges.reshape(c_edges.shape[0],2):
 			delete_edges.append(graph.get_eid(node1,node2))
 		c_graph.delete_edges(delete_edges)
 		if c_graph.is_connected() == False:
-				cbreaks = cbreaks + 1
 				break
-		pc_sp = np.array(c_graph.shortest_paths()).astype(float)
-		# attack_pc_sps.append(np.nansum(pc_sp)/)
+		deg_sp = np.array(d_graph.shortest_paths()).astype(float)
+		c_sp = np.array(c_graph.shortest_paths()).astype(float)
+		attack_degree_sps.append(np.nansum(deg_sp))
+		attack_pc_sps.append(np.nansum(c_sp))
 		idx = idx + 1
-		if idx == 100:
+		if idx == 5000:
 			break
-	# for d_node1,d_node2 in combinations(degree_nodes,2):
-	# 	if graph[d_node1,d_node2] == 0:
-	# 		continue
-	# 	deg_rc_edge = graph.get_eid(d_node1,d_node2)
-	# 	deg_rc_weight = graph.es[deg_rc_edge]["weight"]
-	# 	deg_graph = graph.copy()
-	# 	deg_graph.delete_edges(deg_rc_edge)
-	# 	if deg_graph.is_connected() == False:
-	# 		continue
-	# 	deg_sp = np.array(deg_graph.shortest_paths()).astype(float)
-	# 	attack_degree_sps.append(np.nansum(deg_sp))
-	# for c_node1,c_node2 in combinations(connector_nodes,2):
-	# 	if graph[c_node1,c_node2] == 0:
-	# 		continue
-	# 	pc_rc_edge = graph.get_eid(c_node1,c_node2)
-	# 	pc_rc_weight = graph.es[pc_rc_edge]["weight"]
-	# 	pc_graph = graph.copy()
-	# 	pc_graph.delete_edges(pc_rc_edge)
-	# 	if pc_graph.is_connected() == False:
-	# 		continue
-	# 	pc_sp = np.array(pc_graph.shortest_paths()).astype(float)
-	# 	attack_pc_sps.append(np.nansum(pc_sp))
 	return [attack_pc_sps,attack_degree_sps,healthy_sp]
 
 def human_attacks():
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
+	df = pd.DataFrame(columns=['Attack Type','Sum of Shortest Paths'])
+	btw_df = pd.DataFrame(columns=['Betweenness','Node Type','Task'])
 	for task in tasks:
 		atlas = 'power'
 		print task
@@ -881,7 +948,8 @@ def human_attacks():
 		subject_pcs = static_results['subject_pcs']
 		matrices = static_results['matrices']
 		variables = []
-		for cost in np.arange(5,21)*0.01:
+		for i in np.arange(20):
+			cost = .2
 			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
 			variables.append(graph)
@@ -907,32 +975,77 @@ def human_attacks():
 			deg_btw = np.append(r[1],deg_btw)	
 		print 'Betweenness, PC Versus Degree', scipy.stats.ttest_ind(pc_btw,deg_btw)	
 		sys.stdout.flush()
-		if task == 'WM':
-			df = pd.DataFrame()
-			df['Sum of Shortest Paths'] = healthy_sp
-			df['Attack Type'] = 'None'
-		else:
-			hdf = pd.DataFrame()
-			hdf['Sum of Shortest Paths'] = healthy_sp
-			hdf['Attack Type'] = 'None'
-			df = df.append(hdf)
+		hdf = pd.DataFrame()
+		task_str = np.ones(len(healthy_sp)).astype(str)
+		task_str[:] = task
+		hdf['Task'] = task_str
+		hdf['Sum of Shortest Paths'] = healthy_sp
+		hdf['Attack Type'] = 'None'
+		df = df.append(hdf)
 		d_df = pd.DataFrame()
+		task_str = np.ones(len(attack_degree_sps)).astype(str)
+		task_str[:] = task
+		d_df['Task'] = task_str
 		d_df['Sum of Shortest Paths'] = attack_degree_sps
 		d_df['Attack Type'] = 'Degree Rich Club'
 		df = df.append(d_df)
 		pc_df = pd.DataFrame()
+		task_str = np.ones(len(attack_pc_sps)).astype(str)
+		task_str[:] = task
+		pc_df['Task'] = task_str
 		pc_df['Sum of Shortest Paths'] = attack_pc_sps
 		pc_df['Attack Type'] = 'PC Rich Club'
 		df = df.append(pc_df)
-	sns.violinplot(data=df,y='Sum of Shortest Paths',x='Attack Type',inner='quartile')
-	sns.plt.show()
+		tbtw_df = pd.DataFrame()
+		tbtw_df['Betweenness'] = pc_btw
+		tbtw_df['Node Type'] = 'PC'
+		task_str = np.ones(len(pc_btw)).astype(str)
+		task_str[:] = task
+		tbtw_df['Task'] = task_str
+		btw_df = btw_df.append(tbtw_df)
+		tbtw_df = pd.DataFrame()
+		task_str = np.ones(len(deg_btw)).astype(str)
+		task_str[:] = task
+		tbtw_df['Task'] = task_str
+		tbtw_df['Betweenness'] = deg_btw
+		tbtw_df['Node Type'] = 'Degree'
+		btw_df = btw_df.append(tbtw_df)
+		df.to_csv('/home/despoB/mb3152/dynamic_mod/results/human_attack')
+		btw_df.to_csv('/home/despoB/mb3152/dynamic_mod/results/human_bwt')
+	df = pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/human_attack')
+	btw_df = pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/human_bwt')
+	colors= sns.color_palette(['#3F6075', '#FFC61E'])
+	sns.set(style="whitegrid",font_scale=2)
+	sns.plt.figure(figsize=(51.2,22.8))
+	sns.boxplot(data=df[df['Attack Type']!='None'],x='Task',hue='Attack Type',y="Sum of Shortest Paths",palette=colors)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/attack_human.pdf',dpi=3600)
+	sns.plt.close()
+	sns.plt.figure(figsize=(51.2,22.8))
+	colors= sns.color_palette(['#FFC61E','#3F6075'])
+	sns.boxplot(data=btw_df,x='Task',hue='Node Type',y="Betweenness",palette=colors)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/humanbtw.pdf',dpi=3600)
+	sns.plt.show()   
 	scipy.stats.ttest_ind(df['Sum of Shortest Paths'][df['Attack Type'] == 'Degree Rich Club'],df['Sum of Shortest Paths'][df['Attack Type'] == 'None'])
 	scipy.stats.ttest_ind(df['Sum of Shortest Paths'][df['Attack Type'] == 'PC Rich Club'],df['Sum of Shortest Paths'][df['Attack Type'] == 'Degree Rich Club'])
+
+def rich_club_intersect(graph,rank):
+	vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
+	pc = vc.pc
+	mem = np.array(vc.community.membership)
+	deg = vc.community.graph.strength(weights='weight')
+	deg = np.argsort(deg)[rank:]
+	pc = np.argsort(pc)[rank:]
+	try:
+		overlap = len(deg)/float(len(np.intersect1d(pc,deg)))
+	except:
+		overlap = 0
+	return [overlap,len(np.unique(mem[pc]))/float(len(np.unique(mem))),len(np.unique(mem[deg]))/float(len(np.unique(mem)))]
 
 def human_rich_club():
 	"""
 	rich club stuff
 	"""
+	df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Task'])
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	for task in tasks:
 		atlas = 'power'
@@ -945,11 +1058,18 @@ def human_rich_club():
 		matrices = static_results['matrices']
 		avg_pc_normalized_phis = []
 		avg_degree_normalized_phis = []
+		intersects = []
 		for cost in np.arange(5,21)*0.01:
 			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
 			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
-			1/0
+			inters = rich_club_intersect(graph,211)
+			temp_df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Task'],index=np.arange(1))
+			temp_df["Percent Overlap"] = inters[0]
+			temp_df['Percent Community, PC'] = inters[1]
+			temp_df['Percent Community, Degree'] = inters[2]
+			temp_df['Task'] = task
+			df = df.append(temp_df)
 			# if cost == .1:
 			# 	vc = graph.community_infomap(edge_weights='weight',trials=500)
 			# 	if task == 'WM':
@@ -1015,6 +1135,20 @@ def human_rich_club():
 			plt.tight_layout()
 			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(task),dpi=3600)
 			plt.close()
+	df["Percent Overlap"] = df["Percent Overlap"].astype(float)
+	df['Percent Community, PC'] = df['Percent Community, PC'].astype(float)
+	df['Percent Community, Degree'] = df['Percent Community, Degree'].astype(float)
+	sns.barplot(data=df,x='Percent Overlap',y='Task')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_overlap_human.pdf')
+	sns.plt.show()
+	sns.barplot(data=df,x='Percent Community, PC',y='Task')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_community_pc.pdf')
+	sns.plt.show()
+	sns.barplot(data=df,x='Percent Community, Degree',y='Task')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_community_degree.pdf')	
+	sns.plt.show()
+	for task in tasks:
+		print scipy.stats.ttest_ind(df['Percent Community, PC'][df.Task==task],df['Percent Community, Degree'][df.Task == task])
 
 def classifier(t):
 	train = np.ones(len(pc_vals)).astype(bool)
@@ -1124,21 +1258,16 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		task_perf = task_performance(subjects,task)
 		if task == 'SOCIAL':
 			task_perf[task_perf==1] = np.nan
+			# task_perf[task_perf==0.91666666666675001] = np.nan
 		assert subject_pcs.shape[0] == len(subjects)
 		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
 		df_array = []
 		mod_pc_corr = np.zeros(subject_pcs.shape[1])
 		for i in range(subject_pcs.shape[1]):
-			# mod_pc_corr[i] = nan_pearsonr(rest_subject_mods,rest_subject_pcs[:,i])[0]
 			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
 		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
 		for i in range(subject_wmds.shape[1]):
-			# mod_wmd_corr[i] = nan_pearsonr(rest_subject_mods,rest_subject_wmds[:,i])[0]
 			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
-		# pc_thresh = np.percentile(np.nanmean(rest_results['subject_pcs'],axis=0),80)
-		# mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
-		# predict_nodes = np.where(mean_pc>pc_thresh)[0]
-		# local_predict_nodes = np.where(mean_pc<pc_thresh)[0]
 		predict_nodes = np.where(mod_pc_corr>0.0)[0]
 		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
 		wmd_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
@@ -1154,6 +1283,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			rest_subject_pcs = np.delete(rest_subject_pcs[rest_idx],to_delete,axis=0)
 			rest_subject_wmds = np.delete(rest_subject_wmds[rest_idx],to_delete,axis=0)
 			rest_subject_mods = np.delete(rest_subject_mods[rest_idx],to_delete,axis=0)
+			matrices = np.delete(matrices,to_delete,axis=0)
 			subject_mods = np.delete(subject_mods,to_delete)
 			subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
 			task_perf = np.delete(task_perf,to_delete)
@@ -1164,6 +1294,18 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		"""
 		prediction / cross validation
 		"""
+
+		mod_diff = subject_mods - rest_subject_mods
+		pvals = np.array(subject_mods - rest_subject_mods)
+		pvals = pvals.reshape(pvals.shape[0],1)
+		vs = []
+		for t in range(pvals.shape[0]):
+			train = np.ones(len(pvals)).astype(bool)
+			train[t] = False
+			vs.append([pvals,train,t,task_perf])
+		pool = Pool(20)
+		q_diff_prediction = pool.map(predict,vs)
+		print 'Q Difference Prediction of Performance, LOO: ', pearsonr(q_diff_prediction,task_perf)
 
 		mean_pc = []
 		mean_local_pc = []
@@ -1679,6 +1821,8 @@ def airlines_RC():
 # targeted_attacks()
 # performance_across_tasks(atlas='power',tasks=[sys.argv[1]])
 # performance_across_tasks()
+# split_connectivity_across_tasks()
+# human_attacks()
 """
 SGE Inputs
 """
