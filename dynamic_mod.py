@@ -873,21 +873,24 @@ def specificity():
 	# 	print task, pearsonr(np.nanmean(subject_wmds,axis=0),std_mod)
 	# 	plot_corr_matrix(np.std(matrices,axis=0),network_names.copy(),out_file=None,plot_corr=True,return_array=False)
 
-def between_community_centrality(graph):
+def between_community_centrality(graph,vc=None):
+	if vc == None:
+		vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
 	rank = graph.vcount()/5
-	vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
 	pc = vc.pc
 	pc[np.isnan(pc)] = 0.0
 	deg = np.array(vc.community.graph.strength(weights='weight'))
 	return [np.array(graph.betweenness(weights='weight'))[np.argsort(pc)[-rank:]],
 	np.array(graph.betweenness(weights='weight'))[np.argsort(deg)[-rank:]]]
 
-def attack(graph):
-	vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
+def attack(variables):
+	graph = variables[1]
+	np.random.seed(variables[0])
+	try: vc = variables[2]
+	except: vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
 	pc = vc.pc
 	pc[np.isnan(pc)] = 0.0
 	deg = np.array(vc.community.graph.strength(weights='weight'))
-	cmask = brain_graphs.community_matrix(vc.community.membership,0).astype(bool)
 	nidx = graph.vcount()/5
 	connector_nodes = np.argsort(pc)[-nidx:]
 	degree_nodes = np.argsort(deg)[-nidx:]
@@ -904,131 +907,148 @@ def attack(graph):
 	degree_edges = np.array(degree_edges)
 	idx = 0
 	de = len(connector_edges)
-	dmin = de - (de/10)
-	dmax = de - (de/2)
+	dmin = int(de*.5)
+	dmax = int(de*.9)
 	attack_degree_sps = []
 	attack_pc_sps = []
+	attack_degree_mods = []
+	attack_pc_mods = []
 	while True:
-		num_kill = np.random.choice((dmin,dmax),1)
+		num_kill = np.random.choice(range(dmin,dmax),1)
 		np.random.shuffle(degree_edges)
 		np.random.shuffle(connector_edges)
 		d_edges = degree_edges[:num_kill]
 		c_edges = connector_edges[:num_kill]
 		d_graph = graph.copy()
 		c_graph = graph.copy()
-		delete_edges = []
-		for node1,node2 in d_edges.reshape(d_edges.shape[0],2):
-			delete_edges.append(graph.get_eid(node1,node2))
-		d_graph.delete_edges(delete_edges)
-		if d_graph.is_connected() == False:
-			continue
-		delete_edges = []
-		for node1,node2 in c_edges.reshape(c_edges.shape[0],2):
-			delete_edges.append(graph.get_eid(node1,node2))
-		c_graph.delete_edges(delete_edges)
-		if c_graph.is_connected() == False:
-			continue
+		for cnodes,dnodes in zip(c_edges.reshape(c_edges.shape[0],2),d_edges.reshape(d_edges.shape[0],2)):
+			cnode1,cnode2,dnode1,dnode2  = cnodes[0],cnodes[1],dnodes[0],dnodes[1]
+			d_graph.delete_edges([(dnode1,dnode2)])
+			c_graph.delete_edges([(cnode1,cnode2)])
+			if d_graph.is_connected() == False or c_graph.is_connected() == False:
+				d_graph.add_edges([(dnode1,dnode2)])
+				c_graph.add_edges([(cnode1,cnode2)])
+		# delete_edges = []
+		# for node1,node2 in d_edges.reshape(d_edges.shape[0],2):
+		# 	delete_edges.append(graph.get_eid(node1,node2))
+		# d_graph.delete_edges(delete_edges)
+		# if d_graph.is_connected() == False:
+		# 	continue
+		# delete_edges = []
+		# for node1,node2 in c_edges.reshape(c_edges.shape[0],2):
+		# 	delete_edges.append(graph.get_eid(node1,node2))
+		# c_graph.delete_edges(delete_edges)
+		# if c_graph.is_connected() == False:
+		# 	continue
 		deg_sp = np.array(d_graph.shortest_paths()).astype(float)
 		c_sp = np.array(c_graph.shortest_paths()).astype(float)
 		attack_degree_sps.append(np.nansum(deg_sp))
 		attack_pc_sps.append(np.nansum(c_sp))
+		# attack_degree_mods.append(d_graph.community_infomap(edge_weights='weight').modularity)
+		# attack_pc_mods.append(c_graph.community_infomap(edge_weights='weight').modularity)
 		idx = idx + 1
 		if idx == 500:
 			break
+	# return [attack_pc_sps,attack_degree_sps,healthy_sp,attack_pc_mods,attack_degree_mods,np.mean(healthy_mods)]
 	return [attack_pc_sps,attack_degree_sps,healthy_sp]
 
 def human_attacks():
-	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
-	df = pd.DataFrame(columns=['Attack Type','Sum of Shortest Paths'])
-	btw_df = pd.DataFrame(columns=['Betweenness','Node Type','Task'])
-	for task in tasks:
-		atlas = 'power'
-		print task
-		subjects = np.array(hcp_subjects).copy()
-		subjects = list(subjects)
-		subjects = remove_missing_subjects(subjects,task,atlas)
-		static_results = graph_metrics(subjects,task,atlas)
-		subject_pcs = static_results['subject_pcs']
-		matrices = static_results['matrices']
-		variables = []
-		for i in np.arange(20):
+	tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']
+	try:
+		df = pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/human_attack')
+		btw_df = pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/human_bwt')
+	except:
+		df = pd.DataFrame(columns=['Attack Type','Sum of Shortest Paths'])
+		btw_df = pd.DataFrame(columns=['Betweenness','Node Type','Task'])
+		for task in tasks:
+			atlas = 'power'
+			print task
+			subjects = np.array(hcp_subjects).copy()
+			subjects = list(subjects)
+			subjects = remove_missing_subjects(subjects,task,atlas)
+			static_results = graph_metrics(subjects,task,atlas)
+			subject_pcs = static_results['subject_pcs']
+			matrices = static_results['matrices']
+			variables = []
 			cost = .2
 			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
-			variables.append(graph)
-		pool = Pool(20)
-		results = pool.map(attack,variables)
-		attack_degree_sps = np.array([])
-		attack_pc_sps = np.array([])
-		healthy_sp = np.array([])
-		for r in results:
-			attack_pc_sps = np.append(r[0],attack_pc_sps)
-			attack_degree_sps = np.append(r[1],attack_degree_sps)
-			healthy_sp = np.append(r[2],healthy_sp)
-		attack_degree_sps = np.array(attack_degree_sps).reshape(-1)
-		attack_pc_sps = np.array(attack_pc_sps).reshape(-1)
-		print scipy.stats.ttest_ind(attack_pc_sps,attack_degree_sps)
-		variables = []
-		for i in np.arange(20):
-			cost = .2
-			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
-			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
-			variables.append(graph)
-		pool = Pool(20)
-		b_results = pool.map(between_community_centrality,variables)
-		pc_btw = []
-		deg_btw = []
-		for r in b_results:
-			pc_btw = np.append(r[0],pc_btw)
-			deg_btw = np.append(r[1],deg_btw)	
-		print 'Betweenness, PC Versus Degree', scipy.stats.ttest_ind(pc_btw,deg_btw)	
-		sys.stdout.flush()
-		hdf = pd.DataFrame()
-		task_str = np.ones(len(healthy_sp)).astype(str)
-		task_str[:] = task
-		hdf['Task'] = task_str
-		hdf['Sum of Shortest Paths'] = healthy_sp
-		hdf['Attack Type'] = 'None'
-		df = df.append(hdf)
-		d_df = pd.DataFrame()
-		task_str = np.ones(len(attack_degree_sps)).astype(str)
-		task_str[:] = task
-		d_df['Task'] = task_str
-		d_df['Sum of Shortest Paths'] = attack_degree_sps
-		d_df['Attack Type'] = 'Degree Rich Club'
-		df = df.append(d_df)
-		pc_df = pd.DataFrame()
-		task_str = np.ones(len(attack_pc_sps)).astype(str)
-		task_str[:] = task
-		pc_df['Task'] = task_str
-		pc_df['Sum of Shortest Paths'] = attack_pc_sps
-		pc_df['Attack Type'] = 'PC Rich Club'
-		df = df.append(pc_df)
-		tbtw_df = pd.DataFrame()
-		tbtw_df['Betweenness'] = pc_btw
-		tbtw_df['Node Type'] = 'PC'
-		task_str = np.ones(len(pc_btw)).astype(str)
-		task_str[:] = task
-		tbtw_df['Task'] = task_str
-		btw_df = btw_df.append(tbtw_df)
-		tbtw_df = pd.DataFrame()
-		task_str = np.ones(len(deg_btw)).astype(str)
-		task_str[:] = task
-		tbtw_df['Task'] = task_str
-		tbtw_df['Betweenness'] = deg_btw
-		tbtw_df['Node Type'] = 'Degree'
-		btw_df = btw_df.append(tbtw_df)
+			for i in np.arange(20):
+				variables.append([i,graph.copy(),brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))])
+			pool = Pool(20)
+			results = pool.map(attack,variables)
+			attack_degree_sps = np.array([])
+			attack_pc_sps = np.array([])
+			healthy_sp = np.array([])
+			for r in results:
+				attack_pc_sps = np.append(r[0],attack_pc_sps)
+				attack_degree_sps = np.append(r[1],attack_degree_sps)
+				healthy_sp = np.append(r[2],healthy_sp)
+			attack_degree_sps = np.array(attack_degree_sps).reshape(-1)
+			attack_pc_sps = np.array(attack_pc_sps).reshape(-1)
+			print scipy.stats.ttest_ind(attack_pc_sps,attack_degree_sps)
+			variables = []
+			for i in np.arange(20):
+				cost = .2
+				temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
+				graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
+				variables.append(graph)
+			pool = Pool(20)
+			b_results = pool.map(between_community_centrality,variables)
+			pc_btw = []
+			deg_btw = []
+			for r in b_results:
+				pc_btw = np.append(r[0],pc_btw)
+				deg_btw = np.append(r[1],deg_btw)	
+			print 'Betweenness, PC Versus Degree', scipy.stats.ttest_ind(pc_btw,deg_btw)	
+			sys.stdout.flush()
+			hdf = pd.DataFrame()
+			task_str = np.ones(len(healthy_sp)).astype(str)
+			task_str[:] = task
+			hdf['Task'] = task_str
+			hdf['Sum of Shortest Paths'] = healthy_sp
+			hdf['Attack Type'] = 'None'
+			df = df.append(hdf)
+			d_df = pd.DataFrame()
+			task_str = np.ones(len(attack_degree_sps)).astype(str)
+			task_str[:] = task
+			d_df['Task'] = task_str
+			d_df['Sum of Shortest Paths'] = attack_degree_sps
+			d_df['Attack Type'] = 'Degree Rich Club'
+			df = df.append(d_df)
+			pc_df = pd.DataFrame()
+			task_str = np.ones(len(attack_pc_sps)).astype(str)
+			task_str[:] = task
+			pc_df['Task'] = task_str
+			pc_df['Sum of Shortest Paths'] = attack_pc_sps
+			pc_df['Attack Type'] = 'PC Rich Club'
+			df = df.append(pc_df)
+			tbtw_df = pd.DataFrame()
+			tbtw_df['Betweenness'] = pc_btw
+			tbtw_df['Node Type'] = 'PC'
+			task_str = np.ones(len(pc_btw)).astype(str)
+			task_str[:] = task
+			tbtw_df['Task'] = task_str
+			btw_df = btw_df.append(tbtw_df)
+			tbtw_df = pd.DataFrame()
+			task_str = np.ones(len(deg_btw)).astype(str)
+			task_str[:] = task
+			tbtw_df['Task'] = task_str
+			tbtw_df['Betweenness'] = deg_btw
+			tbtw_df['Node Type'] = 'Degree'
+			btw_df = btw_df.append(tbtw_df)
 		df.to_csv('/home/despoB/mb3152/dynamic_mod/results/human_attack')
 		btw_df.to_csv('/home/despoB/mb3152/dynamic_mod/results/human_bwt')
-	df = pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/human_attack')
-	btw_df = pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/human_bwt')
+	for task in tasks:
+		df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Task']==task)] = df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Task']==task)] / np.nanmean(df['Sum of Shortest Paths'][(df['Attack Type'] == 'None') & (df['Task']==task)])
+		df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Task']==task)] = df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Task']==task)] / np.nanmean(df['Sum of Shortest Paths'][(df['Attack Type'] == 'None') & (df['Task']==task)])
 	colors= sns.color_palette(['#3F6075', '#FFC61E'])
 	sns.set(style="whitegrid",font_scale=2)
 	sns.plt.figure(figsize=(51.2,22.8))
 	sns.boxplot(data=df[df['Attack Type']!='None'],x='Task',hue='Attack Type',y="Sum of Shortest Paths",palette=colors)
 	for i,task in enumerate(tasks):
 		stat = tstatfunc(df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Task']==task)],df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Task']==task)])
-		maxvaly = np.nanmax(np.array(df['Sum of Shortest Paths'][df['Task']==task])) + (np.nanstd(np.array(df['Sum of Shortest Paths'][df['Task']==task]))/2)
+		maxvaly = np.nanmax(np.array(df['Sum of Shortest Paths'][(df['Attack Type'] != 'None') & (df['Task']==task)])) + (np.nanstd(np.array(df['Sum of Shortest Paths'][(df['Task']==task)&(df['Attack Type'] != 'None')]))/2)
 		sns.plt.text(i,maxvaly,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/attack_human.pdf',dpi=3600)
 	sns.plt.close()
@@ -1044,7 +1064,7 @@ def human_attacks():
 	scipy.stats.ttest_ind(df['Sum of Shortest Paths'][df['Attack Type'] == 'PC Rich Club'],df['Sum of Shortest Paths'][df['Attack Type'] == 'Degree Rich Club'])
 
 def structural_attacks(networks=['macaque','c_elegans','power_grid','air_traffic']):
-	networks=['macaque','c_elegans','power_grid','air_traffic']
+	networks=['macaque','c_elegans','air_traffic','power_grid']
 	try:
 		df=pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/stuc_attack')
 		btw_df = pd.read_csv('/home/despoB/mb3152/dynamic_mod/results/struc_bwt')
@@ -1058,6 +1078,7 @@ def structural_attacks(networks=['macaque','c_elegans','power_grid','air_traffic
 				matrix = loadmat('/home/despoB/mb3152/dynamic_mod/%s.mat'%(network))['CIJ']
 				temp_matrix = matrix.copy()
 				graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=1.,mst=True)
+				vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
 			# if network == 'cat':
 			# 	matrix = loadmat('%s.mat'%(network))['CIJall']
 			# 	temp_matrix = matrix.copy()
@@ -1065,11 +1086,23 @@ def structural_attacks(networks=['macaque','c_elegans','power_grid','air_traffic
 			if network == 'c_elegans':
 				graph = Graph.Read_GML('/home/despoB/mb3152/dynamic_mod/celegansneural.gml')
 				graph.es["weight"] = np.ones(graph.ecount())
+				matrix = np.array(graph.get_adjacency(attribute='weight').data)
+				graph = brain_graphs.matrix_to_igraph(matrix,cost=1.,mst=True)
+				vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
 			if network == 'power_grid':
 				graph = power_rich_club(return_graph=True)
+				vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
 			if network == 'air_traffic':
 				graph = airlines_RC(return_graph=True)
-			inters = rich_club_intersect(graph.copy(),(graph.vcount())-graph.vcount()/5)
+				v_to_d = []
+				for i in range(3281):
+					if len(graph.subcomponent(i)) < 3000:
+						v_to_d.append(i)
+				graph.delete_vertices(v_to_d)
+				vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
+			print 'Rich Club Intersection'
+			sys.stdout.flush()
+			inters = rich_club_intersect(graph.copy(),(graph.vcount())-(graph.vcount()/5),vc)
 			temp_df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Task'],index=np.arange(1))
 			temp_df["Percent Overlap"] = inters[0]
 			temp_df['Percent Community, PC'] = inters[1]
@@ -1078,21 +1111,38 @@ def structural_attacks(networks=['macaque','c_elegans','power_grid','air_traffic
 			intdf = intdf.append(temp_df)		
 			variables = []
 			for i in np.arange(20):
-				variables.append(graph.copy())		
+				if network == 'power_grid':
+					variables.append([graph.copy(),vc,i])
+					continue
+				if network == 'air_traffic':
+					variables.append([graph.copy(),vc,i])
+					continue
+				else:
+					variables.append([graph.copy(),brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight')),i])
 			pool = Pool(20)
+			print 'Rich Club Attacks'
+			sys.stdout.flush()
 			results = pool.map(attack,variables)
 			attack_degree_sps = np.array([])
 			attack_pc_sps = np.array([])
 			healthy_sp = np.array([])
+			# attack_degree_mods = np.array([])
+			# attack_pc_mods = np.array([])
+			# healthy_mods = np.array([])
 			for r in results:
 				attack_pc_sps = np.append(r[0],attack_pc_sps)
 				attack_degree_sps = np.append(r[1],attack_degree_sps)
 				healthy_sp = np.append(r[2],healthy_sp)
+				# attack_pc_mods = np.append(r[3],attack_pc_mods)
+				# attack_degree_mods = np.append(r[4],attack_degree_mods)
+				# healthy_mods = np.append(r[5],healthy_mods)
 			attack_degree_sps = np.array(attack_degree_sps).reshape(-1)
 			attack_pc_sps = np.array(attack_pc_sps).reshape(-1)
 			print scipy.stats.ttest_ind(attack_pc_sps,attack_degree_sps)
-			b_results = between_community_centrality(graph.copy())
+			# print scipy.stats.ttest_ind(attack_degree_mods,attack_pc_mods)
+			b_results = between_community_centrality(graph.copy(),vc)
 			print 'Betweenness, PC Versus Degree', scipy.stats.ttest_ind(b_results[0],b_results[1])	
+			sys.stdout.flush()
 			sys.stdout.flush()
 			hdf = pd.DataFrame()
 			task_str = np.ones(len(healthy_sp)).astype(str)
@@ -1190,11 +1240,11 @@ def fce_attacks():
 		for worm in worms:
 			matrix = np.array(pd.read_excel('pnas.1507110112.sd01.xls',sheetname=worm).corr())[4:,4:]
 			variables = []
+			temp_matrix = matrix.copy()
+			graph = brain_graphs.matrix_to_igraph(temp_matrix.copy(),cost=.2,mst=True)
 			for i in np.arange(20):
-				cost = .2
-				temp_matrix = matrix.copy()
-				graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
-				variables.append(graph)
+				vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
+				variables.append([i,graph.copy(),vc])
 			pool = Pool(20)
 			results = pool.map(attack,variables)
 			attack_degree_sps = np.array([])
@@ -1207,9 +1257,8 @@ def fce_attacks():
 			attack_degree_sps = np.array(attack_degree_sps).reshape(-1)
 			attack_pc_sps = np.array(attack_pc_sps).reshape(-1)
 			print scipy.stats.ttest_ind(attack_pc_sps,attack_degree_sps)
-			print scipy.stats.ttest_ind(attack_pc_sps,healthy_sp)
 			variables = []
-			for i in np.arange(50):
+			for i in np.arange(20):
 				# cost = i * 0.01
 				cost = .2
 				temp_matrix = matrix.copy()
@@ -1289,8 +1338,9 @@ def fce_attacks():
 		print 'Damage, PC Versus Degree', scipy.stats.ttest_ind(df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Worm'] == worm)],df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Worm'] == worm)])	
 	print scipy.stats.ttest_ind(df['Sum of Shortest Paths'][df['Attack Type'] == 'PC Rich Club'],df['Sum of Shortest Paths'][df['Attack Type'] == 'Degree Rich Club'])
 
-def rich_club_intersect(graph,rank):
-	vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
+def rich_club_intersect(graph,rank,vc=None):
+	if vc == None:
+		vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
 	pc = vc.pc
 	mem = np.array(vc.community.membership)
 	deg = vc.community.graph.strength(weights='weight')
@@ -1307,7 +1357,7 @@ def human_rich_club():
 	rich club stuff
 	"""
 	df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Task'])
-	tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
+	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	for task in tasks:
 		atlas = 'power'
 		print task
@@ -1828,33 +1878,34 @@ def c_elegans_rich_club(plt_mat=False):
 			pc_average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=pc).phis() for i in range(500)],axis=0)
 			pc_normalized_phis = pc_emperical_phis/pc_average_randomized_phis
 			avg_pc_normalized_phis.append(pc_normalized_phis)
-		sns.set_style("white")
-		sns.set_style("ticks")
-		df["Percent Overlap"] = df["Percent Overlap"].astype(float)
-		df['Percent Community, PC'] = df['Percent Community, PC'].astype(float)
-		df['Percent Community, Degree'] = df['Percent Community, Degree'].astype(float)
-		sns.barplot(data=df,x='Percent Overlap',y='Worm')
-		sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_overlap_fce.pdf')
-		sns.plt.show()
-		sns.barplot(data=df,x='Percent Community, PC',y='Worm')
-		sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_community_pc_fce.pdf')
-		sns.plt.show()
-		sns.barplot(data=df,x='Percent Community, Degree',y='Worm')
-		sns.plt.xticks([0,0.2,0.4,0.6,0.8,1])
-		sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_community_degree_fce.pdf')	
-		sns.plt.show()
-		# degree_normalized_phis = np.nanmean(avg_degree_normalized_phis,axis=0)
-		# pc_normalized_phis = np.nanmean(avg_pc_normalized_phis,axis=0)
-		with sns.plotting_context("paper",font_scale=1):	
-			sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-2],color='b',condition='Degree',ci=95)
-			sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-2],color='r',condition='PC',ci=95)
-			plt.ylabel('Normalized Rich Club Coefficient')
-			plt.xlabel('Rank')
-			sns.despine()
-			plt.legend()
-			plt.tight_layout()
-			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(worm),dpi=3600)
-			plt.close()
+	sns.set_style("white")
+	sns.set_style("ticks")
+	df["Percent Overlap"] = df["Percent Overlap"].astype(float)
+	df['Percent Community, PC'] = df['Percent Community, PC'].astype(float)
+	df['Percent Community, Degree'] = df['Percent Community, Degree'].astype(float)
+	sns.barplot(data=df,x='Percent Overlap',y='Worm')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_overlap_fce.pdf')
+	sns.plt.show()
+	sns.barplot(data=df,x='Percent Community, PC',y='Worm')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_community_pc_fce.pdf')
+	sns.plt.show()
+	sns.barplot(data=df,x='Percent Community, Degree',y='Worm')
+	sns.plt.xticks([0,0.2,0.4,0.6,0.8,1])
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_community_degree_fce.pdf')	
+	sns.plt.show()
+	
+	# degree_normalized_phis = np.nanmean(avg_degree_normalized_phis,axis=0)
+	# pc_normalized_phis = np.nanmean(avg_pc_normalized_phis,axis=0)
+	with sns.plotting_context("paper",font_scale=1):	
+		sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-2],color='b',condition='Degree',ci=95)
+		sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-2],color='r',condition='PC',ci=95)
+		plt.ylabel('Normalized Rich Club Coefficient')
+		plt.xlabel('Rank')
+		sns.despine()
+		plt.legend()
+		plt.tight_layout()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(worm),dpi=3600)
+		plt.close()
 
 def plot_reordered_matrix(matrix,membership=None):
 	import matlab
@@ -1866,9 +1917,8 @@ def plot_reordered_matrix(matrix,membership=None):
 		m_matrix = eng.reorder_mod(r_matrix,matlab.double(membership.tolist()))
 
 def power_rich_club(return_graph=False):
-	graph = Graph.Read_GML('power.gml')
+	graph = Graph.Read_GML('/home/despoB/mb3152/dynamic_mod/power.gml')
 	graph.es["weight"] = np.ones(graph.ecount())
-	
 	if return_graph == True:
 		return graph
 	inters = rich_club_intersect(graph,(graph.vcount())-graph.vcount()/5)
@@ -1995,8 +2045,8 @@ def cat_and_macaque_rich_club(animal='cat'):
 
 def airlines_RC(return_graph=False):
 	vs = []
-	sources = pd.read_csv('routes.dat',header=None)[3].values
-	dests = pd.read_csv('routes.dat',header=None)[5].values
+	sources = pd.read_csv('/home/despoB/mb3152/dynamic_mod/routes.dat',header=None)[3].values
+	dests = pd.read_csv('/home/despoB/mb3152/dynamic_mod/routes.dat',header=None)[5].values
 	graph = Graph()
 	for s in sources:
 		if s in dests:
@@ -2012,8 +2062,8 @@ def airlines_RC(return_graph=False):
 			continue
 
 	graph.add_vertices(np.unique(vs).astype(str))
-	sources = pd.read_csv('routes.dat',header=None)[3].values
-	dests = pd.read_csv('routes.dat',header=None)[5].values
+	sources = pd.read_csv('/home/despoB/mb3152/dynamic_mod/routes.dat',header=None)[3].values
+	dests = pd.read_csv('/home/despoB/mb3152/dynamic_mod/routes.dat',header=None)[5].values
 	for s,d in zip(sources,dests):
 		try:
 			int(s)
@@ -2117,6 +2167,7 @@ def airlines_RC(return_graph=False):
 # performance_across_tasks()
 # split_connectivity_across_tasks()
 # human_attacks()
+# fce_attacks()
 """
 SGE Inputs
 """
