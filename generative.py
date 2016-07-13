@@ -17,6 +17,8 @@ from multiprocessing import Pool
 import sys
 import pickle
 import time
+import powerlaw
+
 """
 SGE:
 qdel -u mb3152
@@ -402,33 +404,42 @@ def preferential_routing_multi(variables):
 	density = variables[2]
 	graph = variables[3]
 	np.random.seed(variables[4])
+	all_shortest = variables[5]
 	print variables[4],variables[0]
-	# t1 = time.time()
+	current_density = graph.density()
 	while True:
 		delete_edges = graph.get_edgelist()
 		if metric != 'none':
 			vc = graph.community_fastgreedy().as_clustering()
 			orig_q = vc.modularity
 			membership = vc.membership
+			orig_sps = np.sum(np.array(graph.shortest_paths()))
 			community_matrix = brain_graphs.community_matrix(membership,0)
-			community_matrix[np.isnan(community_matrix)] == 1
-			orig_sps = np.sum(np.array(graph.shortest_paths())[community_matrix!=1])
+			np.fill_diagonal(community_matrix,1)
+			orig_bc_sps = np.sum(np.array(graph.shortest_paths())[community_matrix!=1])
 			q_edge_scores = []
-			sps_edges_scores = []
+			sps_edge_scores = []
 			for edge in delete_edges:
 				eid = graph.get_eid(edge[0],edge[1],error=False)
 				graph.delete_edges(eid)
 				q_edge_scores.append(VertexClustering(graph,membership).modularity-orig_q)
-				sps_edges_scores.append(orig_sps-np.sum(np.array(graph.shortest_paths())[community_matrix!=1]))
+				if all_shortest == 'all':
+					sps_edge_scores.append(orig_sps-np.sum(np.array(graph.shortest_paths())))
+				if all_shortest == 'bc':
+					sps_edge_scores.append(orig_bc_sps-np.sum(np.array(graph.shortest_paths())[community_matrix!=1]))
 				graph.add_edge(edge[0],edge[1],weight=1)
 			q_edge_scores = np.array(q_edge_scores)
-			sps_edges_scores = np.array(sps_edges_scores)
-			if len(np.unique(sps_edges_scores)) > 1:
-				q_edge_scores = scipy.stats.rankdata(q_edge_scores,method='min')
-				sps_edge_scores = scipy.stats.rankdata(sps_edges_scores,method='min')
-				scores = q_edge_scores + sps_edges_scores
+			sps_edge_scores = np.array(sps_edge_scores)
+			if len(np.unique(sps_edge_scores)) > 1:
+				q_edge_scores = scipy.stats.zscore(scipy.stats.rankdata(q_edge_scores,method='min'))
+				sps_edge_scores = scipy.stats.zscore(scipy.stats.rankdata(sps_edge_scores,method='min'))
+				# sps_edges_scores = scipy.stats.rankdata(sps_edges_scores,method='min')
+				# sps_bc_edge_scores = np.arange(int(graph.ecount()))[np.argsort(sps_bc_edge_scores).astype(int)]
+				# q_edge_scores = np.arange(int(graph.ecount()))[np.argsort(q_edge_scores).astype(int)]
+				scores = q_edge_scores + sps_edge_scores
 			else:
 				scores = scipy.stats.rankdata(q_edge_scores,method='min')
+			scores = scores.astype(int)
 		if metric == 'q':
 			edges = np.array(delete_edges)[np.argsort(scores)][int(-(graph.ecount()*.05)):]
 			edges = np.array(list(edges)[::-1])
@@ -454,7 +465,6 @@ def preferential_routing_multi(variables):
 	degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
 	average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(25)],axis=0)
 	degree_normalized_phis = degree_emperical_phis/average_randomized_phis
-	# print time.time() - t1
 	return [metric,pc_normalized_phis,degree_normalized_phis,graph]
 
 def small_rich_clubs():
@@ -493,7 +503,7 @@ def make_graph(variables):
 			continue
 		if graph.get_eid(i,j,error=False) == -1:
 			graph.add_edge(i,j,weight=1)
-		if graph.density() > .35 and graph.is_connected() == True:
+		if graph.density() > .5 and graph.is_connected() == True:
 			break
 	# graph.es["weight"] = np.random.randint(0,100,graph.ecount())*0.1
 	graph.es["weight"] = np.ones(graph.ecount())
@@ -507,7 +517,7 @@ def make_small_world(variables):
 	graph.es["weight"] = np.ones(graph.ecount())
 	return graph
 
-def preferential_routing(n_nodes=300,density=0.05,iters=100,cores=40):
+def preferential_routing(n_nodes=300,density=0.05,iters=100,cores=40,all_shortest=False):
 	pool = Pool(cores)
 	none_deg_rc = []
 	none_pc_rc = []
@@ -521,9 +531,9 @@ def preferential_routing(n_nodes=300,density=0.05,iters=100,cores=40):
 	graphs = pool.map(make_graph,variables)
 	variables = []
 	for i,g in enumerate(graphs):
-		variables.append(['none',n_nodes,density,g.copy(),i])
+		variables.append(['none',n_nodes,density,g.copy(),i,all_shortest])
 	for i,g in enumerate(graphs):
-		variables.append(['q',n_nodes,density,g.copy(),i])
+		variables.append(['q',n_nodes,density,g.copy(),i,all_shortest])
 	sys.stdout.flush()
 	results = pool.map(preferential_routing_multi,variables)
 	for r in results:
@@ -535,20 +545,19 @@ def preferential_routing(n_nodes=300,density=0.05,iters=100,cores=40):
 			both_pc_rc.append(r[1])
 			both_deg_rc.append(r[2])
 			both_graphs.append(r[3])
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s'%(iters,n_nodes),'w+') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'w+') as f:
 		pickle.dump(none_graphs,f)
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s'%(iters,n_nodes),'w+') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'w+') as f:
 		pickle.dump(both_graphs,f)
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s.npy'%(iters,n_nodes),np.array(none_pc_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s.npy'%(iters,n_nodes),np.array(none_deg_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s.npy'%(iters,n_nodes),np.array(both_pc_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s.npy'%(iters,n_nodes),np.array(both_deg_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s.npy'%(iters,n_nodes,all_shortest),np.array(none_pc_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s_%s.npy'%(iters,n_nodes,all_shortest),np.array(none_deg_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s.npy'%(iters,n_nodes,all_shortest),np.array(both_pc_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s.npy'%(iters,n_nodes,all_shortest),np.array(both_deg_rc))
 
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s'%(iters,n_nodes),'r') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
 		none_graphs = pickle.load(f)
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s'%(iters,n_nodes),'r') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
 		both_graphs = pickle.load(f)
-
 	none_mods = []
 	for g in none_graphs:
 		none_mods.append(g.community_fastgreedy().as_clustering().modularity)
@@ -562,6 +571,22 @@ def preferential_routing(n_nodes=300,density=0.05,iters=100,cores=40):
 		none_mods.append(np.sum(g.shortest_paths()))
 	both_mods = []
 	for g in both_graphs:
+		both_mods.append(np.sum(g.shortest_paths()))
+	print scipy.stats.ttest_ind(both_mods,none_mods)
+	print np.mean(both_mods),np.mean(none_mods)
+
+def all_shortest_vs_bc():
+	iters = 1000
+	n_nodes = 100
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_False'%(iters,n_nodes),'r') as f:
+		bc_graphs = pickle.load(f)
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_True'%(iters,n_nodes),'r') as f:
+		all_graphs = pickle.load(f)
+	none_mods = []
+	for g in all_graphs:
+		none_mods.append(np.sum(g.shortest_paths()))
+	both_mods = []
+	for g in bc_graphs:
 		both_mods.append(np.sum(g.shortest_paths()))
 	print scipy.stats.ttest_ind(both_mods,none_mods)
 	print np.mean(both_mods),np.mean(none_mods)
@@ -592,13 +617,14 @@ def known_graphs():
 		print scipy.stats.ttest_ind(pc_rc,deg_rc)
 
 def analyze_results():
-	n_nodes = 100
-	iters = 1000
-	percent = .95
-	deg_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s.npy'%(iters,n_nodes))
-	pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s.npy'%(iters,n_nodes))
-	none_pc = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s.npy'%(iters,n_nodes))
-	none_deg = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s.npy'%(iters,n_nodes))
+	n_nodes = 200
+	iters = 100
+	percent = .90
+	all_shortest = 'q_only_0.025'
+	deg_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s.npy'%(iters,n_nodes,all_shortest))
+	pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s.npy'%(iters,n_nodes,all_shortest))
+	none_pc = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s.npy'%(iters,n_nodes,all_shortest))
+	none_deg = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s_%s.npy'%(iters,n_nodes,all_shortest))
 	print scipy.stats.ttest_ind(pc_both[:,n_nodes-(n_nodes/5)],none_pc[:,n_nodes-(n_nodes/5)])
 	sns.set_style("white")
 	sns.set_style("ticks")
@@ -613,10 +639,17 @@ def analyze_results():
 	otherax.plot(scipy.stats.ttest_ind(pc_both[:,:int(n_nodes*percent)],none_pc[:,:int(n_nodes*percent)])[0],color='green',label='T Score')
 	sns.plt.legend()
 	sns.plt.xlim(0,int(n_nodes*percent))
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_generative.pdf'%(n_nodes,iters),dpi=1000)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_generative.pdf'%(n_nodes,iters,all_shortest),dpi=1000)
 	sns.plt.show()
 
 def dd_fit():
+	iters = 5000
+	n_nodes = 100
+	all_shortest = False
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+		none_graphs = pickle.load(f)
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+		both_graphs = pickle.load(f)
 	both_dd = []
 	none_dd = []
 	for g in both_graphs:
@@ -627,17 +660,48 @@ def dd_fit():
 	sns.violinplot(df,inner='quartile')
 	sns.plt.title('Power Law Fit')
 	sns.plt.legend()
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_powerfit.pdf'%(n_nodes,iters,all_shortest),dpi=1000)
 	sns.plt.show()
 
-
-def plt_dd_fit():
-	n_nodes = 100
-	iters = 1000
-
-	"degree"
+def analyze_sps(n_nodes=100,iters=5000):
 	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s'%(iters,n_nodes),'r') as f:
 		none_graphs = pickle.load(f)
 	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s'%(iters,n_nodes),'r') as f:
+		both_graphs = pickle.load(f)
+	none_mods = []
+	for g in none_graphs:
+		vc = g.community_fastgreedy().as_clustering()
+		orig_q = vc.modularity
+		membership = vc.membership
+		community_matrix = brain_graphs.community_matrix(membership,0)
+		community_matrix = np.fill_diagonal(community_matrix,1)
+		none_mods.append(np.sum(np.array(g.shortest_paths())[community_matrix!=1]))
+	both_mods = []
+	for g in both_graphs:
+		vc = g.community_fastgreedy().as_clustering()
+		orig_q = vc.modularity
+		membership = vc.membership
+		community_matrix = brain_graphs.community_matrix(membership,0)
+		community_matrix = np.fill_diagonal(community_matrix,1)
+		both_mods.append(np.sum(np.array(g.shortest_paths())[community_matrix!=1]))
+	print scipy.stats.ttest_ind(both_mods,none_mods)
+
+def get_real_degree(density=.05):
+	matrices = glob.glob('/home/despoB/mb3152/dynamic_mod/power_matrices/*rfMRI_REST*matrix*')
+	matrix = np.arctanh(np.load(matrices[0]))
+	for m in matrices[1:]:
+		matrix = np.nansum([matrix,np.arctanh(np.load(m))],axis=0)
+	matrix = matrix / float(len(matrices))
+	graph = brain_graphs.matrix_to_igraph(matrix,density,binary=False,check_tri=True,interpolation='midpoint',normalize=False)
+	return graph.strength(weights='weight')
+
+def plt_dd_fit():
+	iters = 1000
+	n_nodes = 100
+	all_shortest = False
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+		none_graphs = pickle.load(f)
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
 		both_graphs = pickle.load(f)
 
 	none_mods = []
@@ -646,33 +710,61 @@ def plt_dd_fit():
 	both_mods = []
 	for g in both_graphs:
 		both_mods.append(g.degree())
-
-	sns.kdeplot(np.array(none_mods).reshape(-1),shade=True,color='blue')
-	sns.kdeplot(np.array(both_mods).reshape(-1),shade=True,color='yellow')
-
-	sns.distplot(np.array(both_mods).reshape(-1),color='yellow',bins=20, kde=False, rug=True)
-
-	sns.distplot(np.array(none_mods).reshape(-1),color='blue',bins=20, kde=False, rug=True)
+	real_degree = get_real_degree(0.05)
+	real_degree = np.array(real_degree)
+	real_degree = real_degree[real_degree>0]
+	sns.distplot(np.array(both_mods).reshape(-1),color='black',label='Model',norm_hist=True,bins=10,kde=False,hist=True)
+	sns.plt.show()
+	sns.distplot(np.array(real_degree)*2.2,color='yellow',label='Human Brain Network',bins=6,norm_hist=True,kde=False,hist=True)
+	
+	sns.distplot(np.array(none_mods).reshape(-1),color='red',label='Random',bins=6,norm_hist=True,kde=False,hist=True)
+	sns.plt.legend()
+	
+	sns.set_style('white')		
+	fig = sns.plt.figure()
+	bins = 15
+	sns.plt.hist(np.array(both_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='blue',label='Model',stacked=True,bins=bins)
+	sns.plt.legend()
+	sns.plt.xlabel('Degree')
+	sns.plt.ylim(-0.01,.25)
+	sns.plt.ylabel('Normed Count')
+	ax2 = fig.axes[0].twiny()
+	ax2.hist(real_degree,histtype='stepfilled',normed=True,alpha=0.35,color='black',label='Real Data',stacked=True,bins=bins)
+	sns.plt.legend()
+	sns.plt.ylim(-0.01,.25)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_model_real_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
 	sns.plt.show()
 
-	for g in both_graphs[:-1]:
-		data = g.degree()
-		fit = powerlaw.Fit(data, discrete=True)
-		R, p = fit.distribution_compare('power_law', 'lognormal')
-		print R, p
-		R, p = fit.distribution_compare('power_law', 'exponential')
-		print R, p
-		fig = fit.plot_ccdf(color='y')
-		fit.power_law.plot_ccdf(ax=fig, color='r', linestyle='--')
-		# fit.lognormal.plot_ccdf(ax=fig, color='g', linestyle='--', label='Lognormal fit')
-		fit.exponential.plot_ccdf(ax=fig, color='c', linestyle='--')
+	sns.set_style('white')		
+	fig = sns.plt.figure()
+	bins = 15
+	sns.plt.hist(np.array(none_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='yellow',label='Random',stacked=True,bins=bins)
+	sns.plt.legend()
+	sns.plt.ylabel('Normed Count')
+	sns.plt.xlabel('Degree')
+	ax2 = fig.axes[0].twiny()
+	ax2.hist(real_degree,histtype='stepfilled',normed=True,alpha=0.35,color='black',label='Real Data',stacked=True,bins=bins)
+	sns.plt.legend()
+	sns.plt.ylim(-0.01,.25)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_none_real_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
+	sns.plt.show()
 
-	data = both_graphs[-1].degree()
-	fit = powerlaw.Fit(data, discrete=True)
-	R, p = fit.distribution_compare('power_law', 'lognormal')
-	print R, p
-	R, p = fit.distribution_compare('power_law', 'exponential')
-	print R, p
+	sns.set_style('white')		
+	fig = sns.plt.figure()
+	bins = 15
+	sns.plt.hist(np.array(none_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='yellow',label='Random',stacked=True,bins=bins)
+	sns.plt.legend()
+	sns.plt.ylim(-0.01,.25)
+	sns.plt.ylabel('Normed Count')
+	sns.plt.xlabel('Degree')
+	ax2 = fig.axes[0].twiny()
+	
+	ax2.hist(np.array(both_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='blue',label='Model',stacked=True,bins=bins)
+	sns.plt.legend()
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_none_model_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
+	sns.plt.show()
+
+	fit = powerlaw.Fit(np.array(both_mods).reshape(-1))
 	fig = fit.plot_ccdf(label="Model",color='y')
 	fit.power_law.plot_ccdf(ax=fig, color='r', linestyle='--', label='Power law fit')
 	# fit.lognormal.plot_ccdf(ax=fig, color='g', linestyle='--', label='Lognormal fit')
@@ -683,29 +775,11 @@ def plt_dd_fit():
 	fig.set_xlabel(r"Degree")
 	handles, labels = fig.get_legend_handles_labels()
 	fig.legend(handles, labels, loc=3)
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/both_%s_%s.pdf'%(n_nodes,iters), bbox_inches='tight')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/both_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
 	sns.plt.show()
 
-
-	for g in none_graphs[:-1]:
-		data = g.degree()
-		fit = powerlaw.Fit(data, discrete=True)
-		R, p = fit.distribution_compare('power_law', 'lognormal')
-		print R, p
-		R, p = fit.distribution_compare('power_law', 'exponential')
-		print R, p
-		fig = fit.plot_ccdf(color='y')
-		fit.power_law.plot_ccdf(ax=fig, color='r', linestyle='--')
-		# fit.lognormal.plot_ccdf(ax=fig, color='g', linestyle='--', label='Lognormal fit')
-		fit.exponential.plot_ccdf(ax=fig, color='c', linestyle='--')
-
-	data = none_graphs[-1].degree()
-	fit = powerlaw.Fit(data, discrete=True)
-	R, p = fit.distribution_compare('power_law', 'lognormal')
-	print R, p
-	R, p = fit.distribution_compare('power_law', 'exponential')
-	print R, p
-	fig = fit.plot_ccdf(label="RandomModel",color='y')
+	fit = powerlaw.Fit(np.array(none_mods).reshape(-1))
+	fig = fit.plot_ccdf(label="Model",color='y')
 	fit.power_law.plot_ccdf(ax=fig, color='r', linestyle='--', label='Power law fit')
 	# fit.lognormal.plot_ccdf(ax=fig, color='g', linestyle='--', label='Lognormal fit')
 	fit.exponential.plot_ccdf(ax=fig, color='c', linestyle='--', label='Exponential fit')
@@ -715,13 +789,11 @@ def plt_dd_fit():
 	fig.set_xlabel(r"Degree")
 	handles, labels = fig.get_legend_handles_labels()
 	fig.legend(handles, labels, loc=3)
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/none_%s_%s.pdf'%(n_nodes,iters), bbox_inches='tight')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/none_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
 	sns.plt.show()
 
-
-
 if len(sys.argv) > 1:
-	preferential_routing(n_nodes=int(sys.argv[1]),iters=int(sys.argv[2]),cores=int(sys.argv[3]))
+	preferential_routing(n_nodes=int(sys.argv[1]),iters=int(sys.argv[2]),cores=int(sys.argv[3]),all_shortest=sys.argv[4])
 
 
 
