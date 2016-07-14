@@ -331,20 +331,15 @@ def generative_model_shortest_paths_win(n_nodes=264,n_communities=4,gamma=.95,de
 	density: fraction of edges that exists relative to complete graph
 	intial_community_density: the density of nodes that are added to each community in initialization of graph
 	equal_community_size: True, or False if uneven communities are wanted, for which a dirichlet distribution is used.
-
 	Initialization
-
 	Caclulate the number of nodes to modules, according to size, and randomly add edges to match density and gamma
-
 	Generative Growth Model
-
 	1. 
 	Compute number of between and within module edges to add, based on density and fraction
 	2. 
 	within module edge
 	for each node, 1 / average shortest path. to power of BETA
 		add edges to nodes with most shortest paths through it.
-
 	between module edge
 	for each node not in the module, get average shortest path between nodes not in module, but consider paths through module. 
 		add edges to nodes with most shortest paths through it. 
@@ -406,7 +401,7 @@ def preferential_routing_multi(variables):
 	np.random.seed(variables[4])
 	all_shortest = variables[5]
 	print variables[4],variables[0]
-	current_density = graph.density()
+	q_ratio = variables[6]
 	while True:
 		delete_edges = graph.get_edgelist()
 		if metric != 'none':
@@ -436,7 +431,8 @@ def preferential_routing_multi(variables):
 				# sps_edges_scores = scipy.stats.rankdata(sps_edges_scores,method='min')
 				# sps_bc_edge_scores = np.arange(int(graph.ecount()))[np.argsort(sps_bc_edge_scores).astype(int)]
 				# q_edge_scores = np.arange(int(graph.ecount()))[np.argsort(q_edge_scores).astype(int)]
-				scores = q_edge_scores + sps_edge_scores
+				# scores = q_edge_scores + sps_edge_scores
+				scores = (q_edge_scores*q_ratio) + (sps_edge_scores*(1-q_ratio))
 			else:
 				scores = scipy.stats.rankdata(q_edge_scores,method='min')
 			scores = scores.astype(int)
@@ -503,7 +499,7 @@ def make_graph(variables):
 			continue
 		if graph.get_eid(i,j,error=False) == -1:
 			graph.add_edge(i,j,weight=1)
-		if graph.density() > .5 and graph.is_connected() == True:
+		if graph.density() > .35 and graph.is_connected() == True:
 			break
 	# graph.es["weight"] = np.random.randint(0,100,graph.ecount())*0.1
 	graph.es["weight"] = np.ones(graph.ecount())
@@ -517,7 +513,15 @@ def make_small_world(variables):
 	graph.es["weight"] = np.ones(graph.ecount())
 	return graph
 
-def preferential_routing(n_nodes=300,density=0.05,iters=100,cores=40,all_shortest=False):
+def preferential_routing(n_nodes=300,iters=100,cores=40,all_shortest=False,q_ratio=.9):
+	if n_nodes == 100:
+		density=0.05
+	if n_nodes == 200:
+		density = 0.025
+	if n_nodes == 264:
+		density = 0.02
+	if n_nodes == 300:
+		density = 0.015
 	pool = Pool(cores)
 	none_deg_rc = []
 	none_pc_rc = []
@@ -531,9 +535,9 @@ def preferential_routing(n_nodes=300,density=0.05,iters=100,cores=40,all_shortes
 	graphs = pool.map(make_graph,variables)
 	variables = []
 	for i,g in enumerate(graphs):
-		variables.append(['none',n_nodes,density,g.copy(),i,all_shortest])
+		variables.append(['none',n_nodes,density,g.copy(),i,all_shortest,q_ratio])
 	for i,g in enumerate(graphs):
-		variables.append(['q',n_nodes,density,g.copy(),i,all_shortest])
+		variables.append(['q',n_nodes,density,g.copy(),i,all_shortest,q_ratio])
 	sys.stdout.flush()
 	results = pool.map(preferential_routing_multi,variables)
 	for r in results:
@@ -545,18 +549,18 @@ def preferential_routing(n_nodes=300,density=0.05,iters=100,cores=40,all_shortes
 			both_pc_rc.append(r[1])
 			both_deg_rc.append(r[2])
 			both_graphs.append(r[3])
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'w+') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'w+') as f:
 		pickle.dump(none_graphs,f)
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'w+') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'w+') as f:
 		pickle.dump(both_graphs,f)
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s.npy'%(iters,n_nodes,all_shortest),np.array(none_pc_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s_%s.npy'%(iters,n_nodes,all_shortest),np.array(none_deg_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s.npy'%(iters,n_nodes,all_shortest),np.array(both_pc_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s.npy'%(iters,n_nodes,all_shortest),np.array(both_deg_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(none_pc_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(none_deg_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(both_pc_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(both_deg_rc))
 
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		none_graphs = pickle.load(f)
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		both_graphs = pickle.load(f)
 	none_mods = []
 	for g in none_graphs:
@@ -617,15 +621,17 @@ def known_graphs():
 		print scipy.stats.ttest_ind(pc_rc,deg_rc)
 
 def analyze_results():
-	n_nodes = 200
-	iters = 100
+	n_nodes = 100
+	iters = 40
 	percent = .90
-	all_shortest = 'q_only_0.025'
-	deg_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s.npy'%(iters,n_nodes,all_shortest))
-	pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s.npy'%(iters,n_nodes,all_shortest))
-	none_pc = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s.npy'%(iters,n_nodes,all_shortest))
-	none_deg = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s_%s.npy'%(iters,n_nodes,all_shortest))
+	all_shortest = 'bc'
+	q_ratio = .85
+	deg_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+	pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+	none_pc = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+	none_deg = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
 	print scipy.stats.ttest_ind(pc_both[:,n_nodes-(n_nodes/5)],none_pc[:,n_nodes-(n_nodes/5)])
+	print np.nanmean(pc_both[:,n_nodes-(n_nodes/5)])
 	sns.set_style("white")
 	sns.set_style("ticks")
 	ax1 = sns.tsplot(pc_both[:,:int(n_nodes*percent)],color='black',condition='PC_Q',ci=95)
@@ -643,12 +649,13 @@ def analyze_results():
 	sns.plt.show()
 
 def dd_fit():
-	iters = 5000
+	iters = 40
 	n_nodes = 100
-	all_shortest = False
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+	all_shortest = 'bc'
+	q_ratio = .85
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		none_graphs = pickle.load(f)
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		both_graphs = pickle.load(f)
 	both_dd = []
 	none_dd = []
@@ -660,7 +667,7 @@ def dd_fit():
 	sns.violinplot(df,inner='quartile')
 	sns.plt.title('Power Law Fit')
 	sns.plt.legend()
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_powerfit.pdf'%(n_nodes,iters,all_shortest),dpi=1000)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_%s_powerfit.pdf'%(n_nodes,iters,all_shortest,q_ratio),dpi=1000)
 	sns.plt.show()
 
 def analyze_sps(n_nodes=100,iters=5000):
@@ -696,9 +703,9 @@ def get_real_degree(density=.05):
 	return graph.strength(weights='weight')
 
 def plt_dd_fit():
-	iters = 1000
+	iters = 100
 	n_nodes = 100
-	all_shortest = False
+	all_shortest = 'q'
 	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
 		none_graphs = pickle.load(f)
 	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
@@ -714,9 +721,7 @@ def plt_dd_fit():
 	real_degree = np.array(real_degree)
 	real_degree = real_degree[real_degree>0]
 	sns.distplot(np.array(both_mods).reshape(-1),color='black',label='Model',norm_hist=True,bins=10,kde=False,hist=True)
-	sns.plt.show()
 	sns.distplot(np.array(real_degree)*2.2,color='yellow',label='Human Brain Network',bins=6,norm_hist=True,kde=False,hist=True)
-	
 	sns.distplot(np.array(none_mods).reshape(-1),color='red',label='Random',bins=6,norm_hist=True,kde=False,hist=True)
 	sns.plt.legend()
 	
@@ -758,7 +763,6 @@ def plt_dd_fit():
 	sns.plt.ylabel('Normed Count')
 	sns.plt.xlabel('Degree')
 	ax2 = fig.axes[0].twiny()
-	
 	ax2.hist(np.array(both_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='blue',label='Model',stacked=True,bins=bins)
 	sns.plt.legend()
 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_none_model_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
@@ -793,21 +797,4 @@ def plt_dd_fit():
 	sns.plt.show()
 
 if len(sys.argv) > 1:
-	preferential_routing(n_nodes=int(sys.argv[1]),iters=int(sys.argv[2]),cores=int(sys.argv[3]),all_shortest=sys.argv[4])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	preferential_routing(n_nodes=int(sys.argv[1]),iters=int(sys.argv[2]),cores=int(sys.argv[3]),all_shortest=sys.argv[4],q_ratio=float(sys.argv[5]))
