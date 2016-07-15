@@ -620,12 +620,66 @@ def known_graphs():
 		deg_rc.append(np.nanmean(degree_normalized_phis[int(n_nodes*.75):int(n_nodes*.9)]))
 		print scipy.stats.ttest_ind(pc_rc,deg_rc)
 
+def analyze_param_results():
+	n_nodes = 100
+	iters = 100
+	all_shortest = 'all'
+	sps = []
+	bcsps = []
+	mods = []
+	dd_fits = []
+	for q_ratio in np.arange(50,100)*0.01:
+		pc_graphs = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio))
+		sp = []
+		bcsp = []
+		mod = []
+		dd_fit = []
+		for g in pc_graphs:
+			vc = g.community_fastgreedy().as_clustering()
+			community_matrix = brain_graphs.community_matrix(vc.membership,0)
+			theshort = np.array(g.shortest_paths())
+			sp.append(np.sum(theshort))
+			bcsp.append(np.sum(theshort[community_matrix!=1]))
+			mod.append(vc.modularity)
+			dd_fit.append(powerlaw.Fit(g.degree()).distribution_compare('power_law','exponential')[0])
+		sps.append(np.nanmean(sp))
+		bcsps.append(np.nanmean(bcsp))
+		mods.append(np.nanmean(mod))
+		dd_fits.append(np.nanmean(dd_fit))
+	pc_rcs = []
+	for q_ratio in np.arange(50,100)*0.01:
+		pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+		pc_rcs.append(np.nanmean(pc_both[:,int(n_nodes*.80):int(n_nodes*.95)],axis=1))
+
+	sns.set_style('white')
+	ax = sns.tsplot(np.array(pc_rcs).transpose(),np.arange(50,100)*0.01,color='blue',condition='rcc',legend=True)
+	ax.set_yticklabels(ax.get_yticks(),color='blue')
+	sns.plt.legend(loc=1)
+	otherax = ax.twinx()
+	otherax.plot(np.arange(50,100)*0.01,np.array(sps)*-1,color='red',label='efficiency')
+	otherax.set_yticklabels(otherax.get_yticks(),color='red')
+	otherax.legend(loc=6)
+	otherax2 = ax.twinx()
+	otherax2.plot(np.arange(50,100)*0.01,mods,color='yellow',label='modularity')
+	otherax2.set_yticklabels(otherax2.get_yticks(),color='yellow')
+	sns.plt.legend(loc=9)
+	otherax3 = ax.twinx()
+	otherax3.plot(np.arange(50,100)*0.01,dd_fits,color='green',label='power_law_fit')
+	otherax3.set_yticklabels(otherax3.get_yticks(),color='green')
+	sns.plt.legend(loc=2)
+	otherax4 = ax.twinx()
+	otherax4.plot(np.arange(50,100)*0.01,np.array(bcsps)*-1,color='orange',label='bc_efficiency')
+	otherax4.set_yticklabels(otherax4.get_yticks(),color='orange')
+	sns.plt.legend(loc=10)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_params_100.pdf'%(all_shortest))
+	sns.plt.show()
+
 def analyze_results():
 	n_nodes = 100
-	iters = 40
-	percent = .90
-	all_shortest = 'bc'
-	q_ratio = .85
+	iters = 1000
+	all_shortest = 'all'
+	q_ratio = .9
+	percent = .9
 	deg_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
 	pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
 	none_pc = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
@@ -645,14 +699,14 @@ def analyze_results():
 	otherax.plot(scipy.stats.ttest_ind(pc_both[:,:int(n_nodes*percent)],none_pc[:,:int(n_nodes*percent)])[0],color='green',label='T Score')
 	sns.plt.legend()
 	sns.plt.xlim(0,int(n_nodes*percent))
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_generative.pdf'%(n_nodes,iters,all_shortest),dpi=1000)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_%s_generative.pdf'%(n_nodes,iters,all_shortest,q_ratio),dpi=1000)
 	sns.plt.show()
 
 def dd_fit():
-	iters = 40
+	iters = 300
 	n_nodes = 100
 	all_shortest = 'bc'
-	q_ratio = .85
+	q_ratio = .9
 	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		none_graphs = pickle.load(f)
 	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
@@ -663,6 +717,7 @@ def dd_fit():
 		both_dd.append(powerlaw.Fit(g.degree()).distribution_compare('power_law','exponential')[0])
 	for g in none_graphs:
 		none_dd.append(powerlaw.Fit(g.degree()).distribution_compare('power_law','exponential')[0])
+	print scipy.stats.ttest_ind(both_dd,none_dd)
 	df = pd.DataFrame(np.array([both_dd,none_dd]).transpose(),columns=['Model','Random'])
 	sns.violinplot(df,inner='quartile')
 	sns.plt.title('Power Law Fit')
@@ -703,14 +758,14 @@ def get_real_degree(density=.05):
 	return graph.strength(weights='weight')
 
 def plt_dd_fit():
-	iters = 100
+	iters = 500
 	n_nodes = 100
-	all_shortest = 'q'
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+	q_ratio = .8
+	all_shortest = 'all'
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		none_graphs = pickle.load(f)
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s'%(iters,n_nodes,all_shortest),'r') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		both_graphs = pickle.load(f)
-
 	none_mods = []
 	for g in none_graphs:
 		none_mods.append(g.degree())
@@ -720,80 +775,54 @@ def plt_dd_fit():
 	real_degree = get_real_degree(0.05)
 	real_degree = np.array(real_degree)
 	real_degree = real_degree[real_degree>0]
-	sns.distplot(np.array(both_mods).reshape(-1),color='black',label='Model',norm_hist=True,bins=10,kde=False,hist=True)
-	sns.distplot(np.array(real_degree)*2.2,color='yellow',label='Human Brain Network',bins=6,norm_hist=True,kde=False,hist=True)
-	sns.distplot(np.array(none_mods).reshape(-1),color='red',label='Random',bins=6,norm_hist=True,kde=False,hist=True)
-	sns.plt.legend()
-	
+
+	bins = 20
 	sns.set_style('white')		
 	fig = sns.plt.figure()
-	bins = 15
 	sns.plt.hist(np.array(both_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='blue',label='Model',stacked=True,bins=bins)
 	sns.plt.legend()
 	sns.plt.xlabel('Degree')
-	sns.plt.ylim(-0.01,.25)
 	sns.plt.ylabel('Normed Count')
 	ax2 = fig.axes[0].twiny()
 	ax2.hist(real_degree,histtype='stepfilled',normed=True,alpha=0.35,color='black',label='Real Data',stacked=True,bins=bins)
-	sns.plt.legend()
-	sns.plt.ylim(-0.01,.25)
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_model_real_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
+	sns.plt.legend(loc=2)
+	sns.plt.ylim(-0.01)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_model_real_%s_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest,q_ratio))
 	sns.plt.show()
 
 	sns.set_style('white')		
 	fig = sns.plt.figure()
-	bins = 15
 	sns.plt.hist(np.array(none_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='yellow',label='Random',stacked=True,bins=bins)
 	sns.plt.legend()
 	sns.plt.ylabel('Normed Count')
 	sns.plt.xlabel('Degree')
 	ax2 = fig.axes[0].twiny()
 	ax2.hist(real_degree,histtype='stepfilled',normed=True,alpha=0.35,color='black',label='Real Data',stacked=True,bins=bins)
-	sns.plt.legend()
-	sns.plt.ylim(-0.01,.25)
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_none_real_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
+	sns.plt.legend(loc=2)
+	sns.plt.ylim(-0.01)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_none_real_%s_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest,q_ratio))
 	sns.plt.show()
 
-	sns.set_style('white')		
-	fig = sns.plt.figure()
-	bins = 15
-	sns.plt.hist(np.array(none_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='yellow',label='Random',stacked=True,bins=bins)
-	sns.plt.legend()
-	sns.plt.ylim(-0.01,.25)
-	sns.plt.ylabel('Normed Count')
-	sns.plt.xlabel('Degree')
-	ax2 = fig.axes[0].twiny()
-	ax2.hist(np.array(both_mods).reshape(-1)-1,histtype='stepfilled',normed=True,alpha=0.35,color='blue',label='Model',stacked=True,bins=bins)
-	sns.plt.legend()
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/dd_compare_none_model_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
-	sns.plt.show()
-
+	sns.set_style('white')
 	fit = powerlaw.Fit(np.array(both_mods).reshape(-1))
 	fig = fit.plot_ccdf(label="Model",color='y')
-	fit.power_law.plot_ccdf(ax=fig, color='r', linestyle='--', label='Power law fit')
-	# fit.lognormal.plot_ccdf(ax=fig, color='g', linestyle='--', label='Lognormal fit')
-	fit.exponential.plot_ccdf(ax=fig, color='c', linestyle='--', label='Exponential fit')
-
-	####
+	ax1 = fit.power_law.plot_ccdf(ax=fig, color='r', linestyle='--', label='Power law fit')
 	fig.set_ylabel(r"$p(X\geq x)$")
 	fig.set_xlabel(r"Degree")
 	handles, labels = fig.get_legend_handles_labels()
 	fig.legend(handles, labels, loc=3)
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/both_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/model_dfit_%s_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest,q_ratio))
 	sns.plt.show()
 
-	fit = powerlaw.Fit(np.array(none_mods).reshape(-1))
-	fig = fit.plot_ccdf(label="Model",color='y')
-	fit.power_law.plot_ccdf(ax=fig, color='r', linestyle='--', label='Power law fit')
-	# fit.lognormal.plot_ccdf(ax=fig, color='g', linestyle='--', label='Lognormal fit')
-	fit.exponential.plot_ccdf(ax=fig, color='c', linestyle='--', label='Exponential fit')
-
-	####
+	sns.set_style('white')
+	fit = powerlaw.Fit(np.array(real_degree).reshape(-1))
+	fig = fit.plot_ccdf(label="Human Data",color='y')
+	ax1 = fit.power_law.plot_ccdf(ax=fig, color='r', linestyle='--', label='Power law fit')
 	fig.set_ylabel(r"$p(X\geq x)$")
 	fig.set_xlabel(r"Degree")
 	handles, labels = fig.get_legend_handles_labels()
 	fig.legend(handles, labels, loc=3)
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/none_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest))
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/real_data_dfit_%s_%s_%s_%s.pdf'%(n_nodes,iters,all_shortest,q_ratio))
 	sns.plt.show()
 
 if len(sys.argv) > 1:
