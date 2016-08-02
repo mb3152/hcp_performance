@@ -598,16 +598,16 @@ def matrix_of_changes():
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	project='hcp'
 	atlas = 'power'
+	tasks = ['WM']
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
 	for driver in drivers:
-		print driver
 		all_matrices = []
 		violin_df = pd.DataFrame()
 		for task in tasks:
-			print task
-			subjects = np.array(hcp_subjects).copy()
-			subjects = list(subjects)
-			subjects = remove_missing_subjects(subjects,task,atlas)
+			# subjects = np.array(hcp_subjects).copy()
+			# subjects = list(subjects)
+			# subjects = remove_missing_subjects(subjects,task,atlas)
+			subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
 			assert (subjects == np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))).all()
 			static_results = graph_metrics(subjects,task,atlas)
 			subject_pcs = static_results['subject_pcs']
@@ -624,7 +624,7 @@ def matrix_of_changes():
 			mod_wmd_corr = np.zeros(subject_wmds.shape[1])
 			for i in range(subject_wmds.shape[1]):
 				mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
-			if driver == 'pc':
+			if driver == 'PC':
 				predict_nodes = np.where(mod_pc_corr>0.0)[0]
 				local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
 				pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
@@ -730,11 +730,16 @@ def matrix_of_changes():
 			df_array_to_add = make_array_for_df([result_array_to_add,node_type_,edge_type_])
 			task_violin_df = task_violin_df.append(pd.DataFrame(data=df_array_to_add,columns=violin_columns),ignore_index=True)
 			task_violin_df["r value, node i's PCs and j's edge weights"] = task_violin_df["r value, node i's PCs and j's edge weights"].astype(float)
-
-			print 'Within V Between, Connectors: ' + str(scipy.stats.ttest_ind(task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q+'][task_violin_df['Edge Type']=='Within Community'],
-				task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q+'][task_violin_df['Edge Type']=='Between Community']))
-			print 'Within V Between, Local: ' + str(scipy.stats.ttest_ind(task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q-'][task_violin_df['Edge Type']=='Within Community'],
-				task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q-'][task_violin_df['Edge Type']=='Between Community']))
+			if driver == 'PC':
+				print task + ', Connector Hubs(Q+): ' + str(scipy.stats.ttest_ind(task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q+'][task_violin_df['Edge Type']=='Within Community'],
+					task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q+'][task_violin_df['Edge Type']=='Between Community']))
+				print task + ', Non-Connector Hubs(Q-): ' + str(scipy.stats.ttest_ind(task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q-'][task_violin_df['Edge Type']=='Within Community'],
+					task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q-'][task_violin_df['Edge Type']=='Between Community']))
+			else:
+				print task + ', Local Hubs(Q+): ' + str(scipy.stats.ttest_ind(task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q+'][task_violin_df['Edge Type']=='Within Community'],
+					task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q+'][task_violin_df['Edge Type']=='Between Community']))
+				print task + ', Non Local Hubs (Q-): ' + str(scipy.stats.ttest_ind(task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q-'][task_violin_df['Edge Type']=='Within Community'],
+					task_violin_df["r value, node i's PCs and j's edge weights"][task_violin_df['Node Type']=='Q-'][task_violin_df['Edge Type']=='Between Community']))
 			#append for average of all
 			violin_df = violin_df.append(pd.DataFrame(data=task_violin_df,columns=violin_columns),ignore_index=True)
 			#Figure for single Task
@@ -748,10 +753,16 @@ def matrix_of_changes():
 				plt.close()
 		# Average of All
 		plot_corr_matrix(np.nanmean(all_matrices,axis=0),network_names.copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_corr_matrix_avg.pdf'%(driver),plot_corr=False,return_array=False)
-		print 'Within V Between, Connectors: ' + str(scipy.stats.ttest_ind(violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q+'][violin_df['Edge Type']=='Within Community'],
-			violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q+'][violin_df['Edge Type']=='Between Community']))
-		print 'Within V Between, Local: ' + str(scipy.stats.ttest_ind(violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q-'][violin_df['Edge Type']=='Within Community'],
-			violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q-'][violin_df['Edge Type']=='Between Community']))
+		if driver == 'PC':
+			print task + ',Connector Hubs(Q+): ' + str(scipy.stats.ttest_ind(violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q+'][violin_df['Edge Type']=='Within Community'],
+				violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q+'][violin_df['Edge Type']=='Between Community']))
+			print task + ', Non-Connector Hubs(Q-): ' + str(scipy.stats.ttest_ind(violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q-'][violin_df['Edge Type']=='Within Community'],
+				violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q-'][violin_df['Edge Type']=='Between Community']))
+		else:
+			print task + ', Local Hubs(Q+): ' + str(scipy.stats.ttest_ind(violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q+'][violin_df['Edge Type']=='Within Community'],
+				violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q+'][violin_df['Edge Type']=='Between Community']))
+			print task + ', Non-Local Hubs(Q-): ' + str(scipy.stats.ttest_ind(violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q-'][violin_df['Edge Type']=='Within Community'],
+				violin_df["r value, node i's PCs and j's edge weights"][violin_df['Node Type']=='Q-'][violin_df['Edge Type']=='Between Community']))
 		sns.set_style("white")
 		sns.set_style("ticks")
 		colors = sns.color_palette(['#fdfd96','#C4D8E2'])
@@ -774,9 +785,10 @@ def specificity():
 	df = pd.DataFrame(columns = df_columns)
 	for task in tasks:
 		print task
-		subjects = np.array(hcp_subjects).copy()
-		subjects = list(subjects)
-		subjects = remove_missing_subjects(subjects,task,atlas)
+		# subjects = np.array(hcp_subjects).copy()
+		# subjects = list(subjects)
+		# subjects = remove_missing_subjects(subjects,task,atlas)
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
 		static_results = graph_metrics(subjects,task,atlas)
 		subject_pcs = static_results['subject_pcs']
 		subject_wmds = static_results['subject_wmds']
@@ -804,7 +816,7 @@ def specificity():
 				pc_edge_corr = np.arctanh(pc_edge_correlation(subject_wmds,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(project,task,atlas)))
 				connector_nodes = np.where(mod_wmd_corr>0.0)[0]
 				local_nodes = np.where(mod_wmd_corr<0.0)[0]
-			edge_thresh_val = 75.0
+			edge_thresh_val = 75.0 #50.0
 			edge_thresh = np.percentile(np.nanmean(matrices,axis=0),edge_thresh_val)
 			pc_edge_corr[:,np.nanmean(matrices,axis=0)<edge_thresh] = np.nan
 			for driver_nodes in driver_nodes_list:
@@ -1043,16 +1055,16 @@ def human_attacks():
 		df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Task']==task)] = df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Task']==task)] / np.nanmean(df['Sum of Shortest Paths'][(df['Attack Type'] == 'None') & (df['Task']==task)])
 		df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Task']==task)] = df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Task']==task)] / np.nanmean(df['Sum of Shortest Paths'][(df['Attack Type'] == 'None') & (df['Task']==task)])
 	colors= sns.color_palette(['#3F6075', '#FFC61E'])
-	sns.set(style="whitegrid",font_scale=2)
-	sns.plt.figure(figsize=(51.2,22.8))
+	sns.set(style="whitegrid")
+	# sns.plt.figure(figsize=(51.2,22.8))
 	sns.boxplot(data=df[df['Attack Type']!='None'],x='Task',hue='Attack Type',y="Sum of Shortest Paths",palette=colors)
 	for i,task in enumerate(tasks):
 		stat = tstatfunc(df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Task']==task)],df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Task']==task)])
 		maxvaly = np.nanmax(np.array(df['Sum of Shortest Paths'][(df['Attack Type'] != 'None') & (df['Task']==task)])) + (np.nanstd(np.array(df['Sum of Shortest Paths'][(df['Task']==task)&(df['Attack Type'] != 'None')]))/2)
 		sns.plt.text(i,maxvaly,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
+	sns.plt.tight_layout()
 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/attack_human.pdf',dpi=3600)
 	sns.plt.close()
-	sns.plt.figure(figsize=(51.2,22.8))
 	colors= sns.color_palette(['#FFC61E','#3F6075'])
 	sns.boxplot(data=btw_df,x='Task',hue='Node Type',y="Betweenness",palette=colors)
 	for i,task in enumerate(tasks):
@@ -1200,20 +1212,33 @@ def structural_attacks(networks=['macaque','c_elegans','power_grid','air_traffic
 	sns.plt.xticks([0,0.2,0.4,0.6,0.8,1])
 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_community_degree_struct.pdf')
 	sns.plt.show()
-	sns.set(style="whitegrid",font_scale=2)
-	sns.plt.figure(figsize=(51.2,22.8))
-	sns.boxplot(data=df[df['Attack Type']!='None'],x='network',hue='Attack Type',y="Sum of Shortest Paths")
+	colors= sns.color_palette(['#FFC61E','#3F6075'])
+	sns.set(style="whitegrid")
+	sns.boxplot(data=df[(df['Attack Type']!='None') & (df.network!='power_grid') & (df.network!='air_traffic') ],palette=colors,x='network',hue='Attack Type',y="Sum of Shortest Paths")
 	for i,network in enumerate(networks):
 		stat = tstatfunc(df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['network']==network)],df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['network']==network)])
 		maxvaly = np.nanmax(np.array(df['Sum of Shortest Paths'][(df['network']==network) & (df['Attack Type'] != 'None')])) + np.nanstd(np.array(df['Sum of Shortest Paths'][(df['network']==network)&(df['Attack Type'] != 'None')]))/2
 		sns.plt.text(i,maxvaly,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/attack_struc.pdf',dpi=3600)
-	sns.plt.close()
-	sns.plt.figure(figsize=(51.2,22.8))
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/attack_struc1.pdf',dpi=3600)
+	sns.plt.show()
+	sns.boxplot(data=df[(df['Attack Type']!='None') & (df.network!='c_elegans') & (df.network!='macaque') & (df.network!='power_grid')],palette=colors,x='network',hue='Attack Type',y="Sum of Shortest Paths")
+	for i,network in enumerate(networks):
+		stat = tstatfunc(df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['network']==network)],df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['network']==network)])
+		maxvaly = np.nanmax(np.array(df['Sum of Shortest Paths'][(df['network']==network) & (df['Attack Type'] != 'None')])) + np.nanstd(np.array(df['Sum of Shortest Paths'][(df['network']==network)&(df['Attack Type'] != 'None')]))/2
+		sns.plt.text(i,maxvaly,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/attack_struc2.pdf',dpi=3600)
+	sns.plt.show()	
+	sns.boxplot(data=df[(df['Attack Type']!='None') & (df.network!='c_elegans') & (df.network!='macaque') & (df.network!='air_traffic')],palette=colors,x='network',hue='Attack Type',y="Sum of Shortest Paths")
+	for i,network in enumerate(networks):
+		stat = tstatfunc(df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['network']==network)],df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['network']==network)])
+		maxvaly = np.nanmax(np.array(df['Sum of Shortest Paths'][(df['network']==network) & (df['Attack Type'] != 'None')])) + np.nanstd(np.array(df['Sum of Shortest Paths'][(df['network']==network)&(df['Attack Type'] != 'None')]))/2
+		sns.plt.text(i,maxvaly,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/attack_struc3.pdf',dpi=3600)
+	sns.plt.show()	
 	colors= sns.color_palette(['#FFC61E','#3F6075'])
 	for network in networks:
 		btw_df['Betweenness'][btw_df['network']==network] = (btw_df['Betweenness'][btw_df['network']==network] - np.nanmean(btw_df['Betweenness'][btw_df['network']==network])) / np.nanstd(btw_df['Betweenness'][btw_df['network']==network])
-	sns.boxplot(data=btw_df,x='network',hue='Node Type',y="Betweenness")
+	sns.boxplot(data=btw_df,palette=colors,x='network',hue='Node Type',y="Betweenness")
 	sns.plt.ylim(-3,3)
 	for i,network in enumerate(networks):
 		stat = tstatfunc(btw_df['Betweenness'][(btw_df['Node Type'] == 'PC') & (btw_df['network']==network)],btw_df['Betweenness'][(btw_df['Node Type'] == 'Degree') & (btw_df['network']==network)])
@@ -1314,8 +1339,7 @@ def fce_attacks():
 		df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Worm']==Worm)] = df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Worm']==Worm)] / np.nanmean(df['Sum of Shortest Paths'][(df['Attack Type'] == 'None') & (df['Worm']==Worm)])
 		df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Worm']==Worm)] = df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Worm']==Worm)] / np.nanmean(df['Sum of Shortest Paths'][(df['Attack Type'] == 'None') & (df['Worm']==Worm)])
 	colors= sns.color_palette(['#3F6075', '#FFC61E'])
-	sns.set(style="whitegrid",font_scale=2)
-	sns.plt.figure(figsize=(51.2,22.8))
+	sns.set(style="whitegrid")
 	sns.boxplot(data=df[df['Attack Type']!='None'],x='Worm',hue='Attack Type',y="Sum of Shortest Paths",palette=colors)
 	for i,Worm in enumerate(worms):
 		stat = tstatfunc(df['Sum of Shortest Paths'][(df['Attack Type'] == 'PC Rich Club') & (df['Worm']==Worm)],df['Sum of Shortest Paths'][(df['Attack Type'] == 'Degree Rich Club') & (df['Worm']==Worm)])
@@ -1323,7 +1347,6 @@ def fce_attacks():
 		sns.plt.text(i,maxvaly,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/attack_fce.pdf',dpi=3600)
 	sns.plt.close()
-	sns.plt.figure(figsize=(51.2,22.8))
 	colors= sns.color_palette(['#FFC61E','#3F6075'])
 	sns.boxplot(data=btw_df,x='Worm',hue='Node Type',y="Betweenness",palette=colors)
 	for i,Worm in enumerate(worms):
@@ -1358,12 +1381,14 @@ def human_rich_club():
 	"""
 	df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Task'])
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
+	# tasks = ['REST']
 	for task in tasks:
 		atlas = 'power'
 		print task
-		subjects = np.array(hcp_subjects).copy()
-		subjects = list(subjects)
-		subjects = remove_missing_subjects(subjects,task,atlas)
+		# subjects = np.array(hcp_subjects).copy()
+		# subjects = list(subjects)
+		# subjects = remove_missing_subjects(subjects,task,atlas)
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
 		static_results = graph_metrics(subjects,task,atlas)
 		subject_pcs = static_results['subject_pcs']
 		matrices = static_results['matrices']
@@ -1390,10 +1415,20 @@ def human_rich_club():
 
 			## rich club analyses
 			pc_emperical_phis = RC(graph, scores=pc).phis()
+			# pc_average_randomized_phis = []
+			# for i in range(50):
+			# 	temp_graph = graph.copy()
+			# 	temp_graph = preserve_strength(temp_graph,randomize_topology=True)
+			# 	temp_vc = brain_graphs.brain_graph(temp_graph.community_infomap(edge_weights='weight'))
+			# 	temp_pc = temp_vc.pc
+			# 	temp_pc[np.isnan(temp_pc)] = 0.0
+			# 	pc_average_randomized_phis.append(RC(temp_graph,scores=temp_pc).phis())
+			# pc_normalized_phis = pc_emperical_phis/np.nanmean(pc_average_randomized_phis,axis=0)
 			pc_average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=pc).phis() for i in range(100)],axis=0)
 			pc_normalized_phis = pc_emperical_phis/pc_average_randomized_phis
+			
 			degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
-			average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(100)],axis=0)
+			average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(50)],axis=0)
 			degree_normalized_phis = degree_emperical_phis/average_randomized_phis
 			avg_pc_normalized_phis.append(pc_normalized_phis)
 			avg_degree_normalized_phis.append(degree_normalized_phis)
@@ -1448,7 +1483,8 @@ def human_rich_club():
 			sns.despine()
 			plt.legend()
 			plt.tight_layout()
-			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(task),dpi=3600)
+			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s_pc_control.pdf'%(task),dpi=3600)
+			plt.show()
 			plt.close()
 	df["Percent Overlap"] = df["Percent Overlap"].astype(float)
 	df['Percent Community, PC'] = df['Percent Community, PC'].astype(float)
@@ -1840,6 +1876,7 @@ def c_elegans_rich_club(plt_mat=False):
 		matrix = np.array(pd.read_excel('pnas.1507110112.sd01.xls',sheetname=worm).corr())[4:,4:]
 		avg_pc_normalized_phis = []
 		avg_degree_normalized_phis = []
+		print matrix.shape
 		for cost in np.arange(5,21)*0.01:
 			temp_matrix = matrix.copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=cost,mst=True)
@@ -1975,6 +2012,7 @@ def power_rich_club(return_graph=False):
 def c_elegans_str_rich_club():
 	graph = Graph.Read_GML('celegansneural.gml')
 	graph.es["weight"] = np.ones(graph.ecount())
+	print graph.vcount(), graph.ecount()
 	degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
 	average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(100)],axis=0)
 	degree_normalized_phis = degree_emperical_phis/average_randomized_phis
@@ -2010,6 +2048,7 @@ def cat_and_macaque_rich_club(animal='cat'):
 	else:
 		matrix = loadmat('%s.mat'%(animal))['CIJall']
 	graph = brain_graphs.matrix_to_igraph(matrix,cost=1.)
+	print graph.vcount(), graph.ecount()
 	degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
 	degree = graph.strength(weights='weight')
 	average_randomized_phis = np.mean([RC(preserve_strength(graph,randomize_topology=True),scores=degree).phis() for i in range(5000)],axis=0)
