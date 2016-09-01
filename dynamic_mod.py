@@ -34,12 +34,11 @@ import random
 global hcp_subjects
 hcp_subjects = os.listdir('/home/despoB/connectome-data/')
 hcp_subjects.sort()
-global pc_vals 
-global fit_matrices
-global task_perf
-pc_vals = []
-fit_matrices = []
-task_perf = []
+# global pc_vals 
+# global fit_matrices
+# global task_perf
+import statsmodels.api as sm
+from statsmodels.stats.mediation import Mediation
 
 def nan_pearsonr(x,y):
 	x = np.array(x)
@@ -209,8 +208,12 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 	ax.set_yticks(x_ticks)
 	ax.set_xticks(y_ticks)
 	y_names.reverse()
-	std = np.std(corr_mat)
-	sns.heatmap(corr_mat,square=True,yticklabels=y_names,xticklabels=x_names,vmin=-3,vmax=3,linewidths=0.0,cmap="RdBu_r")
+	std = np.nanstd(corr_mat)
+	mean = np.nanmean(corr_mat)
+	# sns.heatmap(corr_mat,square=True,yticklabels=y_names,xticklabels=x_names,vmin=-3,vmax=3,linewidths=0.0,cmap="RdBu_r")
+	vmin = mean - (std*3)
+	vmax = mean + (std*3)
+	sns.heatmap(corr_mat,square=True,vmin=vmin,vmax=vmax,yticklabels=y_names,xticklabels=x_names,linewidths=0.0,cmap="RdBu_r")
 	membership.sort()
 	# Use matplotlib directly to emphasize known networks
 	for i, network in enumerate(membership):
@@ -235,6 +238,64 @@ def make_static_matrix(subject,task,project,atlas):
 	subject_time_series = brain_graphs.load_subject_time_series(subject_path)
 	brain_graphs.time_series_to_matrix(subject_time_series,parcel_path,voxel=False,fisher=False,out_file='/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_%s_matrix.npy' %(atlas,subject,atlas,task))
 	# brain_graphs.time_series_to_matrix(subject_time_series,parcel_path,voxel=False,fisher=False,out_file='/home/despoB/mb3152/%s_%s_%s_matrix_test.npy' %(subject,atlas,task))
+
+def null_graph_individual_graph_analyes(matrix):
+	cost = 0.05
+	temp_matrix = matrix.copy()
+	graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
+	vc = graph.community_infomap(edge_weights='weight')
+	temp_matrix = matrix.copy()
+	random_matrix = temp_matrix.copy()
+	random_matrix = random_matrix[np.tril_indices(264,-1)]
+	np.random.shuffle(random_matrix)
+	temp_matrix[np.tril_indices(264,-1)] = random_matrix
+	temp_matrix[np.triu_indices(264)] = 0.0
+	temp_matrix = np.nansum([temp_matrix,temp_matrix.transpose()],axis=0)
+	graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
+	graph = brain_graphs.brain_graph(VertexClustering(graph,vc.membership))
+	return (graph.community.modularity,np.array(graph.pc),np.array(graph.wmd))
+
+def null_community_individual_graph_analyes(matrix):
+	cost = 0.05
+	temp_matrix = matrix.copy()
+	graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
+	graph = graph.community_infomap(edge_weights='weight')
+	membership = graph.membership
+	np.random.shuffle(membership)
+	graph = brain_graphs.brain_graph(VertexClustering(graph.graph,membership))
+	return (graph.community.modularity,np.array(graph.pc),np.array(graph.wmd))
+
+def null_all_individual_graph_analyes(matrix):
+	cost = 0.01
+	temp_matrix = matrix.copy()
+	random_matrix = temp_matrix.copy()
+	random_matrix = random_matrix[np.tril_indices(264,-1)]
+	np.random.shuffle(random_matrix)
+	temp_matrix[np.tril_indices(264,-1)] = random_matrix
+	temp_matrix[np.triu_indices(264)] = 0.0
+	temp_matrix = np.nansum([temp_matrix,temp_matrix.transpose()],axis=0)
+	graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
+	graph = graph.community_infomap(edge_weights='weight')
+	graph = brain_graphs.brain_graph(graph)
+	return (graph.community.modularity,np.array(graph.pc),np.array(graph.wmd))	
+
+def individual_graph_analyes_wc(matrix):
+	pc = []
+	mod = []
+	wmd = []
+	memlen = []
+	for cost in np.array(range(5,16))*0.01:
+		temp_matrix = matrix.copy()
+		graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True,mst=True)
+		del temp_matrix
+		graph = graph.community_infomap(edge_weights='weight')
+		graph = brain_graphs.brain_graph(graph)
+		pc.append(np.array(graph.pc))
+		wmd.append(np.array(graph.wmd))
+		mod.append(graph.community.modularity)
+		memlen.append(len(graph.community.sizes()))
+		del graph
+	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0),np.nanmean(memlen))
 
 def individual_graph_analyes(variables):
 	subject = variables[0]
@@ -772,6 +833,274 @@ def matrix_of_changes():
 			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_edge_mod_avg.pdf'%(driver),dpi=4600)
 			plt.close()
 
+def multi_med(data):
+	outcome_model = sm.OLS.from_formula("q ~ weight + pc", data)
+	mediator_model = sm.OLS.from_formula("weight ~ pc", data)
+	med_val = np.mean(Mediation(outcome_model, mediator_model, "pc", "weight").fit(n_rep=10).ACME_avg)
+	return med_val
+
+def mediation(n=0):
+	"""
+	264,264,264 matrix, which edges mediate the relationship between PC and Q
+	"""
+	atlas = 'power'
+	project='hcp'
+	tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']
+	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
+	for task in tasks:
+		task = 'REST'
+		print task
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+		static_results = graph_metrics(subjects,task,atlas)
+		matrices = static_results['matrices']
+		subject_pcs = static_results['subject_pcs']
+		subject_mods = static_results['subject_mods']
+		mod_pc_corr = np.zeros(subject_pcs.shape[1])
+		for i in range(subject_pcs.shape[1]):
+			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+		locality_df = pd.DataFrame()
+		e_tresh = np.percentile(mean_conn,90)
+		for i in range(62):
+			real_t = scipy.stats.ttest_ind(np.abs(m[i][np.argwhere(mean_conn[i]>e_tresh)].reshape(-1)),np.abs(m[i][np.argwhere(mean_conn[i]<e_tresh)].reshape(-1)))[0]
+			locality_df = locality_df.append({'t_type':'real','t':real_t},ignore_index=True)
+			fake_t = []
+			for j in range(62):
+				fake_t.append(scipy.stats.ttest_ind(np.abs(m[j][np.argwhere(mean_conn[i]>e_tresh)].reshape(-1)),np.abs(m[j][np.argwhere(mean_conn[i]<e_tresh)].reshape(-1)))[0])
+			locality_df = locality_df.append({'t_type':'null','t':np.nanmean(fake_t)},ignore_index=True)
+		locality_df.dropna(inplace=True)
+		print scipy.stats.ttest_ind(locality_df.t[locality_df.t_type=='real'],locality_df.t[locality_df.t_type=='null'])
+		mod_edge_corr = np.zeros((264,264))
+		for i,j in combinations(range(264),2):
+			print i
+			rr = nan_pearsonr(matrices[:,i,j],subject_mods)
+			mod_edge_corr[i,j] = rr[0]
+			mod_edge_corr[j,i] = rr[0]
+			# mod_pc_corr[i] = nan_pearsonr(task_perf,subject_pcs[:,i])[0]
+		# threshes = [0.1,.2,0.25,.3]
+		# threshes = [.1]
+		# mean_pc = np.nanmean(subject_pcs,axis=0)
+		# for thresh in threshes:
+		# 	df = pd.DataFrame()
+		# 	for i in range(len(subject_pcs)):
+		# 		for pi,p in enumerate(subject_pcs[i]):
+		# 			if mod_pc_corr[pi] < thresh:
+		# 				continue
+		# 			df = df.append({'node':pi,'Q':subject_mods[i],'PC':p},ignore_index=True)
+		# 			# df = df.append({'node':pi,'Performance':task_perf[i],'PC':p},ignore_index=True)
+		# 	sns.lmplot('PC','Q',df,hue='node',order=2,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+		# 	sns.plt.xlim([0,.75])
+		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_2.pdf'%(thresh))
+		# 	sns.plt.close()
+		# 	sns.lmplot('PC','Q',df,hue='node',order=3,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+		# 	sns.plt.xlim([0,.75])
+		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_3.pdf'%(thresh))
+		# 	sns.plt.close()
+		# 	sns.lmplot('PC','Q',df,hue='node',lowess=True,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+		# 	sns.plt.xlim([0,.75])
+		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_lowless.pdf'%(thresh))
+		# 	sns.plt.close()
+		# 	sns.lmplot('PC','Q',df,order=2,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+		# 	sns.plt.xlim([0,.75])
+		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_2.pdf'%(thresh))
+		# 	sns.plt.close()
+		# 	sns.lmplot('PC','Q',df,order=3,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+		# 	sns.plt.xlim([0,.75])
+		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_3.pdf'%(thresh))
+		# 	sns.plt.close()
+		# 	sns.lmplot('PC','Q',df,lowess=True,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+		# 	sns.plt.xlim([0,.75])
+		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_lowless.pdf'%(thresh))
+		# 	sns.plt.close()
+
+		subject_pcs[np.isnan(subject_pcs)] = 0.0
+		result = np.zeros((264,264,264))
+		result = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new.npy')
+		pool = Pool(40)
+		for n in range(47,264):
+			print n
+			sys.stdout.flush()
+			variables =  []
+			for i,j in combinations(range(264),2):
+				variables.append(pd.DataFrame(data={'pc':subject_pcs[:,n],'weight':matrices[:,i,j],'q':subject_mods},index=range(len(subject_pcs))))
+			results = pool.map(multi_med,variables)
+			for r,i in zip(results,combinations(range(264),2)):
+				result[n,i[0],i[1]] = r
+				result[n,i[1],i[0]] = r
+			np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_0.npy',result)
+		1/0
+		# pool = Pool(40)
+		# results = pool.map(individual_graph_analyes_wc,matrices)
+		# subject_pcs = []
+		# subject_wmds = []
+		# subject_mods = []
+		# subject_coms = []
+		# for r in results:
+		# 	subject_mods.append(np.nanmean(r[0]))
+		# 	subject_pcs.append(r[1])
+		# 	subject_wmds.append(r[2])
+		# 	subject_coms.append(r[3])
+		# subject_pcs = np.array(subject_pcs)
+		# subject_wmds = np.array(subject_wmds)
+		# subject_mods = np.array(subject_mods)
+		# subject_coms = np.array(subject_coms)
+		# mean_pc = np.nanmean(subject_pcs,axis=0)
+		# mean_wmd = np.nanmean(subject_wmds,axis=0)
+		# mod_pc_corr = np.zeros(subject_pcs.shape[1])
+		# for i in range(subject_pcs.shape[1]):
+		# 	mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+		# community_med_rs = []
+		# for i in range(264):
+		# 	if mod_pc_corr[0] <= 0.0:
+		# 		continue
+		# 	data = pd.DataFrame(data={'pc':subject_pcs[:,i],'weight':subject_coms,'q':subject_mods},index=range(len(subject_pcs)))
+		# 	outcome_model = sm.OLS.from_formula("q ~ weight + pc", data)
+		# 	mediator_model = sm.OLS.from_formula("weight ~ pc", data)
+		# 	community_med_rs.append(np.mean(Mediation(outcome_model, mediator_model, "pc", "weight").fit(n_rep=10).ACME_avg))
+		# plot_df = pd.DataFrame(data={'Mediation Values':np.array(community_med_rs),'PC-Q R':mod_pc_corr)	
+		plot_df = pd.DataFrame(data={'Community Size':subject_coms,'Q':subject_mods})
+		sns.regplot('Community Size', 'Q',plot_df,robust=True,fit_reg=True)
+
+def sm_null():
+	try:
+		r = np.load('/home/despoB/mb3152/dynamic_mod/results/null_sw_results.npy')
+	except:
+		sw_rs = []
+		sw_crs = []
+		for i in range(100):
+			print i
+			pc = []
+			mod = []
+			wmd = []
+			memlen = []
+			for s in range(100):
+				graph = Graph.Watts_Strogatz(1,264,7,.25)
+				graph.es["weight"] = np.ones(graph.ecount())
+				graph = graph.community_infomap()
+				graph = brain_graphs.brain_graph(graph)
+				pc.append(np.array(graph.pc))
+				wmd.append(np.array(graph.wmd))
+				mod.append(graph.community.modularity)
+				memlen.append(len(graph.community.sizes()))
+			pc = np.array(pc)
+			mod = np.array(mod)
+			wmd = np.array(wmd)
+			memlen = np.array(memlen)
+			mod_pc_corr = np.zeros(264)
+			for i in range(264):
+				mod_pc_corr[i] = nan_pearsonr(mod,pc[:,i])[0]
+			print pearsonr(np.nanmean(pc,axis=0),mod_pc_corr)[0]
+			print pearsonr(mod,memlen)[0]
+			sw_rs.append(pearsonr(np.nanmean(pc,axis=0),mod_pc_corr)[0])
+			sw_crs.append(pearsonr(mod,memlen)[0])
+		r = np.array([sw_rs,sw_crs])
+		np.save('/home/despoB/mb3152/dynamic_mod/results/null_sw_results.npy',r)
+	return r
+
+def null():
+	sm_null_results = sm_null()[0]
+	atlas = 'power'
+	project='hcp'
+	task = 'REST'
+	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
+	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+	static_results = graph_metrics(subjects,task,atlas)
+	subject_pcs = static_results['subject_pcs']
+	subject_wmds = static_results['subject_wmds']
+	subject_mods = static_results['subject_mods']
+	subject_wmds = static_results['subject_wmds']
+	matrices = static_results['matrices']
+	try:
+		null_graph_rs,null_community_rs,null_all_rs = np.load('/home/despoB/mb3152/dynamic_mod/results/null_results.npy')
+	except:
+		null_graph_rs = []
+		null_community_rs = []
+		null_all_rs = []
+		for i in range(100):
+			pool = Pool(40)
+			n_g = pool.map(null_graph_individual_graph_analyes,matrices)
+			n_c = pool.map(null_community_individual_graph_analyes,matrices)
+			n_a = pool.map(null_all_individual_graph_analyes,matrices)
+			"""
+			null graph
+			"""
+			n_g_subject_pcs = []
+			n_g_subject_wmds = []
+			n_g_subject_mods = []
+			for mod,pc,wmd in n_g:
+				n_g_subject_mods.append(mod)
+				n_g_subject_pcs.append(pc)
+				n_g_subject_wmds.append(wmd)
+			n_g_subject_pcs = np.array(n_g_subject_pcs)
+			n_g_subject_wmds = np.array(n_g_subject_wmds)
+			n_g_subject_mods = np.array(n_g_subject_mods)
+			mean_pc = np.nanmean(n_g_subject_pcs,axis=0)
+			mean_wmd = np.nanmean(n_g_subject_wmds,axis=0)
+			n_g_mod_pc_corr = np.zeros(n_g_subject_pcs.shape[1])
+			for i in range(n_g_subject_pcs.shape[1]):
+				n_g_mod_pc_corr[i] = nan_pearsonr(n_g_subject_mods,n_g_subject_pcs[:,i])[0]
+			n_g_mod_wmd_corr = np.zeros(n_g_subject_wmds.shape[1])
+			for i in range(n_g_subject_wmds.shape[1]):
+				n_g_mod_wmd_corr[i] = nan_pearsonr(n_g_subject_mods,n_g_subject_wmds[:,i])[0]
+			print 'Pearson R, PC & Q, Mean PC: ', nan_pearsonr(n_g_mod_pc_corr,mean_pc)
+			null_graph_rs.append(nan_pearsonr(n_g_mod_pc_corr,mean_pc)[0])
+			# print 'Pearson R, PC & WCD, Mean WMD: ', nan_pearsonr(n_g_mod_wmd_corr,mean_wmd)
+
+			n_c_subject_pcs = []
+			n_c_subject_wmds = []
+			n_c_subject_mods = []
+			for mod,pc,wmd in n_c:
+				n_c_subject_mods.append(mod)
+				n_c_subject_pcs.append(pc)
+				n_c_subject_wmds.append(wmd)
+			n_c_subject_pcs = np.array(n_c_subject_pcs)
+			n_c_subject_wmds = np.array(n_c_subject_wmds)
+			n_c_subject_mods = np.array(n_c_subject_mods)
+			mean_pc = np.nanmean(n_c_subject_pcs,axis=0)
+			mean_wmd = np.nanmean(n_c_subject_wmds,axis=0)
+			n_c_mod_pc_corr = np.zeros(n_c_subject_pcs.shape[1])
+			for i in range(n_c_subject_pcs.shape[1]):
+				n_c_mod_pc_corr[i] = nan_pearsonr(n_c_subject_mods,n_c_subject_pcs[:,i])[0]
+			n_c_mod_wmd_corr = np.zeros(n_c_subject_wmds.shape[1])
+			for i in range(n_c_subject_wmds.shape[1]):
+				n_c_mod_wmd_corr[i] = nan_pearsonr(n_c_subject_mods,n_c_subject_wmds[:,i])[0]
+			print 'Pearson R, PC & Q, Mean PC: ', nan_pearsonr(n_c_mod_pc_corr,mean_pc)
+			null_community_rs.append(nan_pearsonr(n_c_mod_pc_corr,mean_pc)[0])
+			# print 'Pearson R, PC & WCD, Mean WMD: ', nan_pearsonr(mod_wmd_corr,mean_wmd)
+
+			n_a_subject_pcs = []
+			n_a_subject_wmds = []
+			n_a_subject_mods = []
+			for mod,pc,wmd in n_a:
+				n_a_subject_mods.append(mod)
+				n_a_subject_pcs.append(pc)
+				n_a_subject_wmds.append(wmd)
+			n_a_subject_pcs = np.array(n_a_subject_pcs)
+			n_a_subject_wmds = np.array(n_a_subject_wmds)
+			n_a_subject_mods = np.array(n_a_subject_mods)
+			mean_pc = np.nanmean(n_a_subject_pcs,axis=0)
+			mean_wmd = np.nanmean(n_a_subject_wmds,axis=0)
+			n_a_mod_pc_corr = np.zeros(n_a_subject_pcs.shape[1])
+			for i in range(n_a_subject_pcs.shape[1]):
+				n_a_mod_pc_corr[i] = nan_pearsonr(n_a_subject_mods,n_a_subject_pcs[:,i])[0]
+			n_a_mod_wmd_corr = np.zeros(n_a_subject_wmds.shape[1])
+			for i in range(n_a_subject_wmds.shape[1]):
+				n_a_mod_wmd_corr[i] = nan_pearsonr(n_a_subject_mods,n_a_subject_wmds[:,i])[0]
+			print 'Pearson R, PC & Q, Mean PC: ', nan_pearsonr(n_a_mod_pc_corr,mean_pc)
+			null_all_rs.append(nan_pearsonr(n_a_mod_pc_corr,mean_pc)[0])
+			# print 'Pearson R, PC & WCD, Mean WMD: ', nan_pearsonr(mod_n_a_wmd_corr,mean_wmd)
+		results = np.array([null_graph_rs,null_community_rs,null_all_rs])
+		np.save('/home/despoB/mb3152/dynamic_mod/results/null_results.npy',results)
+	df = pd.DataFrame(columns=['R','Null Model Type'])
+	for r in null_graph_rs:
+		df = df.append({'R':r,'Null Model Type':'Random Edges, Real Community'},ignore_index=True)
+	for r in null_community_rs:
+		df = df.append({'R':r,'Null Model Type':'Random Community, Real Edges'},ignore_index=True)
+	for r in null_all_rs:
+		df = df.append({'R':r,'Null Model Type':'Random Edges, Clustered'},ignore_index=True)
+	for r in sm_null_results:
+		df = df.append({'R':r,'Null Model Type':'Wattz-Strogatz'},ignore_index=True)
+	sns.violinplot(x="Null Model Type", y="R", data=df,inner="quartile")
+
 def specificity():
 	"""
 	Specificity of modulation by nodes' PC.
@@ -785,6 +1114,7 @@ def specificity():
 	df = pd.DataFrame(columns = df_columns)
 	for task in tasks:
 		print task
+		task = 'REST'
 		# subjects = np.array(hcp_subjects).copy()
 		# subjects = list(subjects)
 		# subjects = remove_missing_subjects(subjects,task,atlas)
@@ -796,7 +1126,8 @@ def specificity():
 		subject_wmds = static_results['subject_wmds']
 		matrices = static_results['matrices']
 		#sum of weight changes for each node, by each node.
-		hub_nodes = ['PC','WMD']
+		hub_nodes = ['PC','WCD']
+		hub_nodes = ['WCD']
 		driver_nodes_list = ['Q+','Q-']
 		mean_pc = np.nanmean(subject_pcs,axis=0)
 		mean_wmd = np.nanmean(subject_wmds,axis=0)
@@ -816,7 +1147,7 @@ def specificity():
 				pc_edge_corr = np.arctanh(pc_edge_correlation(subject_wmds,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(project,task,atlas)))
 				connector_nodes = np.where(mod_wmd_corr>0.0)[0]
 				local_nodes = np.where(mod_wmd_corr<0.0)[0]
-			edge_thresh_val = 75.0 #50.0
+			edge_thresh_val = 50.0 #50.0
 			edge_thresh = np.percentile(np.nanmean(matrices,axis=0),edge_thresh_val)
 			pc_edge_corr[:,np.nanmean(matrices,axis=0)<edge_thresh] = np.nan
 			for driver_nodes in driver_nodes_list:
@@ -847,18 +1178,20 @@ def specificity():
 				temp_matrix = np.nanmean(matrices,axis=0)
 				weight_matrix = weight_change_matrix_within-weight_change_matrix_between
 				weight_matrix[np.isnan(weight_matrix)] = 0.0
-				df_columns=['Task','Hub Measure','Q+/Q-','Average Edge i-j Weight',"Strength of r's, i's PC & j's Q"]
+				if hub_node == 'PC':
+					df_columns=['Task','Hub Measure','Q+/Q-','Average Edge i-j Weight',"Strength of r's, i's PC & j's Q"]
+				else:
+					df_columns=['Task','Hub Measure','Q+/Q-','Average Edge i-j Weight',"Strength of r's, i's WCD & j's Q"]
 				df_array = []
 				for i,j in zip(temp_matrix[weight_matrix!=0.0].reshape(-1),weight_matrix[weight_matrix!=0.0].reshape(-1)):
 					df_array.append([task,hub_node,driver_nodes,i,j])
 				df = pd.concat([df,pd.DataFrame(df_array,columns=df_columns)],axis=0)
 				print driver_nodes
 				print pearsonr(weight_matrix[weight_matrix!=0.0].reshape(-1),temp_matrix[weight_matrix!=0.0].reshape(-1))
-
-	plot_connectivity_results(df[(df['Q+/Q-']=='Q+') &(df['Hub Measure']=='PC')],"Strength of r's, i's PC & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_pcqplus_%s.pdf'%(edge_thresh_val))
-	plot_connectivity_results(df[(df['Q+/Q-']=='Q-') &(df['Hub Measure']=='PC')],"Strength of r's, i's PC & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_pcqminus_%s.pdf'%(edge_thresh_val))
-	plot_connectivity_results(df[(df['Q+/Q-']=='Q+') &(df['Hub Measure']=='WMD')],"Strength of r's, i's PC & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_wmdqplus_%s.pdf'%(edge_thresh_val))
-	plot_connectivity_results(df[(df['Q+/Q-']=='Q-') &(df['Hub Measure']=='WMD')],"Strength of r's, i's PC & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_wmdqminus_%s.pdf'%(edge_thresh_val))
+	# plot_connectivity_results(df[(df['Q+/Q-']=='Q+') &(df['Hub Measure']=='PC')],"Strength of r's, i's PC & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_pcqplus_%s.pdf'%(edge_thresh_val))
+	# plot_connectivity_results(df[(df['Q+/Q-']=='Q-') &(df['Hub Measure']=='PC')],"Strength of r's, i's PC & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_pcqminus_%s.pdf'%(edge_thresh_val))
+	plot_connectivity_results(df[(df['Q+/Q-']=='Q+') &(df['Hub Measure']=='WCD')],"Strength of r's, i's WCD & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_wmdqplus_%s.pdf'%(edge_thresh_val))
+	plot_connectivity_results(df[(df['Q+/Q-']=='Q-') &(df['Hub Measure']=='WCD')],"Strength of r's, i's WCD & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_wmdqminus_%s.pdf'%(edge_thresh_val))
 	# """
 	# Are connector nodes modulating the edges that are most variable across subjects?
 	# """
@@ -1381,7 +1714,8 @@ def human_rich_club():
 	"""
 	df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Task'])
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
-	# tasks = ['REST']
+	known_membership,network_names,num_nodes,name_int_dict = network_labels('power')
+	network_df = pd.DataFrame(columns=['Task',"Club", "Network",'Number of Club Nodes'])
 	for task in tasks:
 		atlas = 'power'
 		print task
@@ -1403,10 +1737,21 @@ def human_rich_club():
 			vc = brain_graphs.brain_graph(graph.community_infomap(edge_weights='weight'))
 			pc = vc.pc
 			pc[np.isnan(pc)] = 0.0
+			deg_rank = np.argsort(graph.strength(weights='weight'))[211:]
+			pc_rank = np.argsort(pc)[211:]
+			# for dcn,rcn in zip(pc_rank,deg_rank):
+			# 	network_df = network_df.append({'Task':task,'Club':'Diverse Club','Network':network_names[dcn]},ignore_index=True)
+			# 	network_df = network_df.append({'Task':task,'Club':'Rich Club', 'Network':network_names[rcn]},ignore_index=True)
+			for network in network_names:
+				pc_networks = network_names[pc_rank]==network
+				deg_networks = network_names[deg_rank]==network
+				network_df = network_df.append({'Task':task,'Club':'Diverse Club','Network':network,'Number of Club Nodes':len(pc_networks[pc_networks==True])},ignore_index=True)
+				network_df = network_df.append({'Task':task,'Club':'Rich Club', 'Network':network,'Number of Club Nodes':len(deg_networks[deg_networks==True])},ignore_index=True)
 
 			# community properites of the club
 			inters = rich_club_intersect(graph,211)
 			temp_df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Task'],index=np.arange(1))
+			
 			temp_df["Percent Overlap"] = inters[0]
 			temp_df['Percent Community, PC'] = inters[1]
 			temp_df['Percent Community, Degree'] = inters[2]
@@ -1428,10 +1773,23 @@ def human_rich_club():
 			pc_normalized_phis = pc_emperical_phis/pc_average_randomized_phis
 			
 			degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
-			average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(50)],axis=0)
+			average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(100)],axis=0)
 			degree_normalized_phis = degree_emperical_phis/average_randomized_phis
 			avg_pc_normalized_phis.append(pc_normalized_phis)
 			avg_degree_normalized_phis.append(degree_normalized_phis)
+		sns.set_style("white")
+		sns.set_style("ticks")
+		with sns.plotting_context("paper",font_scale=2):	
+			# sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-2],color='b',condition='Degree',ci=95)
+			# sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-2],color='r',condition='PC',ci=95)
+			sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-13],color='b',condition='Degree',ci=95)
+			sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-13],color='r',condition='PC',ci=95)
+			plt.ylabel('Normalized Rich Club Coefficient')
+			plt.xlabel('Rank')
+			sns.despine()
+			plt.legend()
+			plt.tight_layout()
+			sns.plt.show()
 		# 	if cost == 0.05:
 		# 		graph.vs['pc'] = pc
 		# 		graph.vs['Community'] = vc.community.membership
@@ -1471,25 +1829,41 @@ def human_rich_club():
 		# make_surf_image(pc,configs='/home/despoB/mb3152/BrainNet/pc_values.mat',outfile='/home/despoB/mb3152/dynamic_mod/brain_figures/rich_club/%s_pc.png' %(task))
 		# make_surf_image(combined_array,configs='/home/despoB/mb3152/BrainNet/pc_values.mat',outfile='/home/despoB/mb3152/dynamic_mod/brain_figures/rich_club/%s_combined_rc.png' %(task),drop_zero=True)
 
-		sns.set_style("white")
-		sns.set_style("ticks")
-		with sns.plotting_context("paper",font_scale=2):	
-			# sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-2],color='b',condition='Degree',ci=95)
-			# sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-2],color='r',condition='PC',ci=95)
-			sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-13],color='b',condition='Degree',ci=95)
-			sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-13],color='r',condition='PC',ci=95)
-			plt.ylabel('Normalized Rich Club Coefficient')
-			plt.xlabel('Rank')
-			sns.despine()
-			plt.legend()
-			plt.tight_layout()
-			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s_pc_control.pdf'%(task),dpi=3600)
-			plt.show()
-			plt.close()
+
+	sns.set_style("white")
+	sns.set_style("ticks")
+	sns.barplot(data=network_df,x='Network',y='Number of Club Nodes',hue='Club',palette=sns.color_palette(['#7EE062','#050081']))
+	sns.plt.xticks(rotation=90)
+	sns.plt.ylabel('Mean Number of Club Nodes in Network')
+	sns.plt.title('Rich and Diverse Club Network Membership Across Tasks and Costs')
+	sns.plt.tight_layout()
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/both_club_membership.pdf',dpi=3600)
+	sns.plt.show()
+	sns.plt.close()
+
+	sns.set_style("white")
+	sns.set_style("ticks")
+	with sns.plotting_context("paper",font_scale=2):	
+		# sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-2],color='b',condition='Degree',ci=95)
+		# sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-2],color='r',condition='PC',ci=95)
+		sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-13],color='b',condition='Degree',ci=95)
+		sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-13],color='r',condition='PC',ci=95)
+		plt.ylabel('Normalized Rich Club Coefficient')
+		plt.xlabel('Rank')
+		sns.despine()
+		plt.legend()
+		plt.tight_layout()
+		sns.plt.show()
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s_pc_control.pdf'%(task),dpi=3600)
+		plt.show()
+		plt.close()
+
+
 	df["Percent Overlap"] = df["Percent Overlap"].astype(float)
 	df['Percent Community, PC'] = df['Percent Community, PC'].astype(float)
 	df['Percent Community, Degree'] = df['Percent Community, Degree'].astype(float)
 	sns.barplot(data=df,x='Percent Overlap',y='Task')
+	sns.barplot(data=df,x='Percent Overlap',y='Task',hue='Club',palette=['r','b'])
 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/percent_overlap_human.pdf')
 	sns.plt.show()
 	sns.barplot(data=df,x='Percent Community, PC',y='Task')
@@ -1871,6 +2245,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 def c_elegans_rich_club(plt_mat=False):
 	worms = ['Worm1','Worm2','Worm3','Worm4']
 	df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Worm'])
+	plt_mat = False
 	for worm in worms:
 		# matrix = np.arctanh(np.array(pd.read_excel('pnas.1507110112.sd01.xls',sheetname=worm).corr())[4:,4:])
 		matrix = np.array(pd.read_excel('pnas.1507110112.sd01.xls',sheetname=worm).corr())[4:,4:]
@@ -1915,6 +2290,18 @@ def c_elegans_rich_club(plt_mat=False):
 			pc_average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=pc).phis() for i in range(500)],axis=0)
 			pc_normalized_phis = pc_emperical_phis/pc_average_randomized_phis
 			avg_pc_normalized_phis.append(pc_normalized_phis)
+		sns.set_style("white")
+		sns.set_style("ticks")
+		with sns.plotting_context("paper",font_scale=1):	
+			sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-int(graph.vcount()/20.)],color='b',condition='Rich Club',ci=95)
+			sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-int(graph.vcount()/20.)],color='r',condition='Diverse Club',ci=95)
+			plt.ylabel('Normalized Club Coefficient')
+			plt.xlabel('Rank')
+			sns.despine()
+			plt.legend()
+			plt.tight_layout()
+			plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(worm),dpi=3600)
+			plt.close()
 	sns.set_style("white")
 	sns.set_style("ticks")
 	df["Percent Overlap"] = df["Percent Overlap"].astype(float)
@@ -1933,16 +2320,6 @@ def c_elegans_rich_club(plt_mat=False):
 	
 	# degree_normalized_phis = np.nanmean(avg_degree_normalized_phis,axis=0)
 	# pc_normalized_phis = np.nanmean(avg_pc_normalized_phis,axis=0)
-	with sns.plotting_context("paper",font_scale=1):	
-		sns.tsplot(np.array(avg_degree_normalized_phis)[:,:-2],color='b',condition='Degree',ci=95)
-		sns.tsplot(np.array(avg_pc_normalized_phis)[:,:-2],color='r',condition='PC',ci=95)
-		plt.ylabel('Normalized Rich Club Coefficient')
-		plt.xlabel('Rank')
-		sns.despine()
-		plt.legend()
-		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(worm),dpi=3600)
-		plt.close()
 
 def plot_reordered_matrix(matrix,membership=None):
 	import matlab
@@ -1958,26 +2335,26 @@ def power_rich_club(return_graph=False):
 	graph.es["weight"] = np.ones(graph.ecount())
 	if return_graph == True:
 		return graph
-	inters = rich_club_intersect(graph,(graph.vcount())-graph.vcount()/5)
-	variables = []
-	for i in np.arange(20):
-		temp_matrix = matrix.copy()
-		graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=1.,mst=True)
-		variables.append(graph)		
-	pool = Pool(20)
-	results = pool.map(attack,variables)
-	attack_degree_sps = np.array([])
-	attack_pc_sps = np.array([])
-	healthy_sp = np.array([])
-	for r in results:
-		attack_pc_sps = np.append(r[0],attack_pc_sps)
-		attack_degree_sps = np.append(r[1],attack_degree_sps)
-		healthy_sp = np.append(r[2],healthy_sp)
-	attack_degree_sps = np.array(attack_degree_sps).reshape(-1)
-	attack_pc_sps = np.array(attack_pc_sps).reshape(-1)
-	print scipy.stats.ttest_ind(attack_pc_sps,attack_degree_sps)
-	btw = between_community_centrality(graph)
-	scipy.stats.ttest_ind(btw[0],btw[1])
+	# inters = rich_club_intersect(graph,(graph.vcount())-graph.vcount()/5)
+	# variables = []
+	# for i in np.arange(20):
+	# 	temp_matrix = matrix.copy()
+	# 	graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=1.,mst=True)
+	# 	variables.append(graph)		
+	# pool = Pool(20)
+	# results = pool.map(attack,variables)
+	# attack_degree_sps = np.array([])
+	# attack_pc_sps = np.array([])
+	# healthy_sp = np.array([])
+	# for r in results:
+	# 	attack_pc_sps = np.append(r[0],attack_pc_sps)
+	# 	attack_degree_sps = np.append(r[1],attack_degree_sps)
+	# 	healthy_sp = np.append(r[2],healthy_sp)
+	# attack_degree_sps = np.array(attack_degree_sps).reshape(-1)
+	# attack_pc_sps = np.array(attack_pc_sps).reshape(-1)
+	# print scipy.stats.ttest_ind(attack_pc_sps,attack_degree_sps)
+	# btw = between_community_centrality(graph)
+	# scipy.stats.ttest_ind(btw[0],btw[1])
 
 	degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
 	average_randomized_phis = np.nanmean([RC(preserve_strength(graph,randomize_topology=True),scores=graph.strength(weights='weight')).phis() for i in range(50)],axis=0)
@@ -1998,9 +2375,9 @@ def power_rich_club(return_graph=False):
 	sns.set_style("white")
 	sns.set_style("ticks")
 	with sns.plotting_context("paper",font_scale=1):	
-		sns.tsplot(np.array(degree_normalized_phis)[:-2],color='b',condition='Degree',ci=99)
-		sns.tsplot(np.array(pc_normalized_phis)[:-2],color='r',condition='PC',ci=99)
-		plt.ylabel('Normalized Rich Club Coefficient')
+		sns.tsplot(np.array(degree_normalized_phis)[:-int(graph.vcount()/20.)],color='b',condition='Rich Club',ci=99)
+		sns.tsplot(np.array(pc_normalized_phis)[:-int(graph.vcount()/20.)],color='r',condition='Diverse Club',ci=99)
+		plt.ylabel('Normalized Club Coefficient')
 		plt.xlabel('Rank')
 		sns.despine()
 		plt.legend()
@@ -2032,9 +2409,9 @@ def c_elegans_str_rich_club():
 	sns.set_style("white")
 	sns.set_style("ticks")
 	with sns.plotting_context("paper",font_scale=1):	
-		sns.tsplot(np.array(degree_normalized_phis)[:-2],color='b',condition='Degree',ci=99)
-		sns.tsplot(np.array(pc_normalized_phis)[:-2],color='r',condition='PC',ci=99)
-		plt.ylabel('Normalized Rich Club Coefficient')
+		sns.tsplot(np.array(degree_normalized_phis)[:-int(graph.vcount()/20.)],color='b',condition='Rich Club',ci=99)
+		sns.tsplot(np.array(pc_normalized_phis)[:-int(graph.vcount()/20.)],color='r',condition='Diverse Club',ci=99)
+		plt.ylabel('Normalized Club Coefficient')
 		plt.xlabel('Rank')
 		sns.despine()
 		plt.legend(loc='upper left')
@@ -2042,11 +2419,8 @@ def c_elegans_str_rich_club():
 		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_structural.pdf',dpi=3600)
 		plt.show()
 
-def cat_and_macaque_rich_club(animal='cat'):
-	if animal == 'macaque':
-		matrix = loadmat('%s.mat'%(animal))['CIJ']
-	else:
-		matrix = loadmat('%s.mat'%(animal))['CIJall']
+def macaque_rich_club():
+	matrix = loadmat('%s.mat'%('macaque'))['CIJ']
 	graph = brain_graphs.matrix_to_igraph(matrix,cost=1.)
 	print graph.vcount(), graph.ecount()
 	degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
@@ -2071,14 +2445,14 @@ def cat_and_macaque_rich_club(animal='cat'):
 	# 	graph.vs['degree_rc'] = degree_rc
 	# 	graph.write_gml('macaque_gephi.gml')
 	with sns.plotting_context("paper",font_scale=1):	
-		sns.tsplot(degree_normalized_phis[:-2],color='b',condition='Degree',ci=90)
-		sns.tsplot(pc_normalized_phis[:-2],color='r',condition='PC',ci=90)
-		plt.ylabel('Normalized Rich Club Coefficient')
+		sns.tsplot(degree_normalized_phis[:-int(graph.vcount()/20.)],color='b',condition='Rich Club',ci=90)
+		sns.tsplot(pc_normalized_phis[:-int(graph.vcount()/20.)],color='r',condition='Diverse Club',ci=90)
+		plt.ylabel('Normalized Club Coefficient')
 		plt.xlabel('Rank')
 		sns.despine()
 		plt.legend(loc='upper left')
 		plt.tight_layout()
-		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_%s.pdf'%(animal),dpi=3600)
+		plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/rich_club_macaque.pdf',dpi=3600)
 		plt.show()
 		# plt.close()
 
@@ -2123,26 +2497,26 @@ def airlines_RC(return_graph=False):
 	graph.delete_vertices(np.argwhere((np.array(graph.degree())==0)==True))
 	if return_graph == True:
 		return graph
-	inters = rich_club_intersect(graph,(graph.vcount())-graph.vcount()/5)
-	variables = []
-	for i in np.arange(20):
-		temp_matrix = matrix.copy()
-		graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=1.,mst=True)
-		variables.append(graph)		
-	pool = Pool(20)
-	results = pool.map(attack,variables)
-	attack_degree_sps = np.array([])
-	attack_pc_sps = np.array([])
-	healthy_sp = np.array([])
-	for r in results:
-		attack_pc_sps = np.append(r[0],attack_pc_sps)
-		attack_degree_sps = np.append(r[1],attack_degree_sps)
-		healthy_sp = np.append(r[2],healthy_sp)
-	attack_degree_sps = np.array(attack_degree_sps).reshape(-1)
-	attack_pc_sps = np.array(attack_pc_sps).reshape(-1)
-	print scipy.stats.ttest_ind(attack_pc_sps,attack_degree_sps)
-	btw = between_community_centrality(graph)
-	print scipy.stats.ttest_ind(btw[0],btw[1])
+	# inters = rich_club_intersect(graph,(graph.vcount())-graph.vcount()/5)
+	# variables = []
+	# for i in np.arange(20):
+	# 	temp_matrix = matrix.copy()
+	# 	graph = brain_graphs.matrix_to_igraph(temp_matrix,cost=1.,mst=True)
+	# 	variables.append(graph)		
+	# pool = Pool(20)
+	# results = pool.map(attack,variables)
+	# attack_degree_sps = np.array([])
+	# attack_pc_sps = np.array([])
+	# healthy_sp = np.array([])
+	# for r in results:
+	# 	attack_pc_sps = np.append(r[0],attack_pc_sps)
+	# 	attack_degree_sps = np.append(r[1],attack_degree_sps)
+	# 	healthy_sp = np.append(r[2],healthy_sp)
+	# attack_degree_sps = np.array(attack_degree_sps).reshape(-1)
+	# attack_pc_sps = np.array(attack_pc_sps).reshape(-1)
+	# print scipy.stats.ttest_ind(attack_pc_sps,attack_degree_sps)
+	# btw = between_community_centrality(graph)
+	# print scipy.stats.ttest_ind(btw[0],btw[1])
 
 	degree_emperical_phis = RC(graph, scores=graph.strength(weights='weight')).phis()
 	degree = graph.strength(weights='weight')
@@ -2158,9 +2532,9 @@ def airlines_RC(return_graph=False):
 	sns.set_style("ticks")
 	airports = pd.read_csv('airports.dat',header=None)
 	with sns.plotting_context("paper",font_scale=1):	
-		sns.tsplot(np.array(degree_normalized_phis)[:-2],color='b',condition='Degree',ci=99)
-		sns.tsplot(np.array(pc_normalized_phis)[:-2],color='r',condition='PC',ci=99)
-		plt.ylabel('Normalized Rich Club Coefficient')
+		sns.tsplot(np.array(degree_normalized_phis)[:-int(graph.vcount()/20.)],color='b',condition='Rich Club',ci=99)
+		sns.tsplot(np.array(pc_normalized_phis)[:-int(graph.vcount()/20.)],color='r',condition='Diverse Club',ci=99)
+		plt.ylabel('Normalized Club Coefficient')
 		plt.xlabel('Rank')
 		sns.despine()
 		plt.legend()
@@ -2210,7 +2584,7 @@ def airlines_RC(return_graph=False):
 """
 SGE Inputs
 """
-
+mediation()
 if len(sys.argv) > 1:
 	if sys.argv[1] == 'perf':
 		performance_across_tasks()
