@@ -2750,7 +2750,7 @@ def airlines_RC(return_graph=False):
 # subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
 # graph_metrics(subjects,task,atlas,project='hcp',run_version='fz_scrubbed',run=True)
 # motion_across_tasks()
-performance_across_tasks()
+# performance_across_tasks()
 # structural_attacks(networks=['macaque','c_elegans','power_grid','air_traffic'])
 # targeted_attacks()
 # performance_across_tasks(atlas='power',tasks=[sys.argv[1]])
