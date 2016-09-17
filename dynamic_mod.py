@@ -39,6 +39,42 @@ hcp_subjects.sort()
 # global task_perf
 import statsmodels.api as sm
 from statsmodels.stats.mediation import Mediation
+from scipy import stats, linalg
+
+def partial_corr(C):
+    """
+    Returns the sample linear partial correlation coefficients between pairs of variables in C, controlling 
+    for the remaining variables in C.
+    Parameters
+    ----------
+    C : array-like, shape (n, p)
+        Array with the different variables. Each column of C is taken as a variable
+    Returns
+    -------
+    P : array-like, shape (p, p)
+        P[i, j] contains the partial correlation of C[:, i] and C[:, j] controlling
+        for the remaining variables in C.
+    """
+    
+    C = np.asarray(C)
+    p = C.shape[1]
+    P_corr = np.zeros((p, p), dtype=np.float)
+    for i in range(p):
+        P_corr[i, i] = 1
+        for j in range(i+1, p):
+            idx = np.ones(p, dtype=np.bool)
+            idx[i] = False
+            idx[j] = False
+            beta_i = linalg.lstsq(C[:, idx], C[:, j])[0]
+            beta_j = linalg.lstsq(C[:, idx], C[:, i])[0]
+
+            res_j = C[:, j] - C[:, idx].dot( beta_i)
+            res_i = C[:, i] - C[:, idx].dot(beta_j)
+            
+            corr = stats.pearsonr(res_i, res_j)[0]
+            P_corr[i, j] = corr
+            P_corr[j, i] = corr
+    return P_corr
 
 def nan_pearsonr(x,y):
 	x = np.array(x)
@@ -232,12 +268,15 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 
 def make_static_matrix(subject,task,project,atlas):
 	hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
-	# hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg_new*'
 	parcel_path = '/home/despoB/mb3152/dynamic_mod/atlases/%s_template.nii' %(atlas)
+	try:
+		MP = np.load('/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task))
+	except:
+		run_fd(subject,task)
+		MP = np.load('/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task))
 	subject_path = hcp_subject_dir.replace('SUBJECT',subject).replace('TASK',task)
-	subject_time_series = brain_graphs.load_subject_time_series(subject_path)
-	brain_graphs.time_series_to_matrix(subject_time_series,parcel_path,voxel=False,fisher=False,out_file='/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_%s_matrix.npy' %(atlas,subject,atlas,task))
-	# brain_graphs.time_series_to_matrix(subject_time_series,parcel_path,voxel=False,fisher=False,out_file='/home/despoB/mb3152/%s_%s_%s_matrix_test.npy' %(subject,atlas,task))
+	subject_time_series = brain_graphs.load_subject_time_series(subject_path,dis_file=MP,scrub_mm=0.2)
+	brain_graphs.time_series_to_matrix(subject_time_series,parcel_path,voxel=False,fisher=False,out_file='/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_%s_matrix_scrubbed_0.2.npy' %(atlas,subject,atlas,task))
 
 def null_graph_individual_graph_analyes(matrix):
 	cost = 0.05
@@ -367,7 +406,7 @@ def check_normalize(subjects,task,atlas='power'):
 			assert np.diff([cost,graph.density()])[0] < .005
 			assert np.min(graph.get_adjacency(attribute='weight').data) >= 0.0
 
-def graph_metrics(subjects,task,atlas,project='hcp',run_version='fz',run=False):
+def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False):
 	"""
 	run graph metrics or load them
 	"""
@@ -385,7 +424,8 @@ def graph_metrics(subjects,task,atlas,project='hcp',run_version='fz',run=False):
 		thresh_matrices = []
 		for subject in subjects:
 			s_matrix = []
-			files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
+			files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task))
+			# files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
 			for f in files:
 				f = np.load(f)
 				np.fill_diagonal(f,0.0)
@@ -404,7 +444,7 @@ def graph_metrics(subjects,task,atlas,project='hcp',run_version='fz',run=False):
 		subject_wmds = []
 		print 'Running Graph Theory Analyses'
 		from multiprocessing import Pool
-		pool = Pool(16)
+		pool = Pool(10)
 		results = pool.map(individual_graph_analyes,variables)		
 		for r,s in zip(results,subjects):
 			subject_mods.append(np.nanmean(r[0]))
@@ -514,6 +554,106 @@ def split_connectivity_across_tasks(n_iters=10000):
 	sns.violinplot(data=df,y='Pearson R, WCD, WCD & Q',x='Task',inner='quartile')
 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/split_wcd.pdf',dpi=3600)
 	sns.plt.close()
+
+def run_fd(subject,task):
+	try:
+		MP = np.load('/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task))
+	except:
+		outfile = '/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task)
+		MP = np.loadtxt('/home/despoB/connectome-raw/%s/MNINonLinear/Results/%s/Movement_Regressors.txt'%(subject,task))
+		FD = brain_graphs.compute_FD(MP[:,:6])
+		FD = np.append(0,FD)
+		np.save(outfile,FD)
+		MP = np.load('/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task))
+	return MP
+
+def get_sub_motion(subject,task):
+	smo = 0
+	motion_files = glob.glob('/home/despoB/mb3152/dynamic_mod/motion_files/%s_*%s*' %(subject,task))
+	for m in motion_files:
+		smo = smo + np.sum(np.load(m))
+	if len(motion_files) == 0:
+		smo = np.nan
+	return smo
+
+def all_motion(tasks,atlas='power'):
+	everything = ['tfMRI_WM_RL','tfMRI_WM_LR','rfMRI_REST1_LR','rfMRI_REST2_LR','rfMRI_REST1_RL','rfMRI_REST2_RL','tfMRI_RELATIONAL_LR','tfMRI_RELATIONAL_RL','tfMRI_SOCIAL_RL','tfMRI_SOCIAL_LR','tfMRI_LANGUAGE_LR','tfMRI_LANGUAGE_RL','tfMRI_GAMBLING_RL','tfMRI_MOTOR_RL','tfMRI_GAMBLING_LR','tfMRI_MOTOR_LR']
+	for task in everything:
+		print task
+		if 'REST' in task:
+			subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task.split('_')[1][:4],atlas))
+		else:
+			subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task.split('_')[1],atlas))
+		for subject in subjects:
+			try:
+				run_fd(subject,task)
+			except:
+				print subject,task
+
+def motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']):
+	global hcp_subjects
+	tasks = ['WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','REST','MOTOR']
+	# tasks = ['WM','REST','RELATIONAL','SOCIAL','LANGUAGE',]
+	# tasks = ['REST']
+	project='hcp'
+	atlas = 'power'
+	for task in tasks:
+		print task
+		test_subs(task)
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+		static_results = graph_metrics(subjects,task,atlas,run_version='scrub_.2')
+		subject_pcs = static_results['subject_pcs']
+		subject_mods = static_results['subject_mods']
+		subject_wmds = static_results['subject_wmds']
+		matrices = static_results['matrices']
+		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
+		subject_motion = []
+		for subject in subjects:
+			subject_motion.append(get_sub_motion(subject,task))
+		assert (np.isnan(subject_motion)==True).any() == False
+		assert np.min(subject_motion) > 0.
+		print np.min(subject_motion)
+		if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
+			task_perf = task_performance(subjects,task)
+			to_delete = np.isnan(task_perf).copy()
+			# to_delete[np.argwhere(np.isnan(subject_motion)==True).reshape(-1)] = True
+			to_delete = np.where(to_delete==True)
+			task_perf = np.delete(task_perf,to_delete)
+			task_perf = scipy.stats.zscore(task_perf)
+		else:
+			to_delete = np.isnan(subject_motion).copy()
+			to_delete = np.where(to_delete==True)
+		subject_pcs = np.delete(subject_pcs,to_delete,axis=0)
+		matrices = np.delete(matrices,to_delete,axis=0)
+		subject_mods = np.delete(subject_mods,to_delete)
+		subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
+		subject_pcs[np.isnan(subject_pcs)] = 0.0
+		subject_wmds[np.isnan(subject_wmds)] = 0.0
+		subject_motion = np.delete(subject_motion,to_delete)
+		mod_pc_corr = np.zeros(subject_pcs.shape[1])
+		cmod_pc_corr = np.zeros(subject_pcs.shape[1])
+		cmod_perf_corr = np.zeros(subject_pcs.shape[1])
+		mod_perf_corr = np.zeros(subject_pcs.shape[1])
+		r_mod = sm.GLM(subject_mods,sm.add_constant(subject_motion)).fit()
+		print np.isclose(0.0,pearsonr(r_mod.resid_response,subject_motion)[0])
+		if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
+			r_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit()
+		for i in range(subject_pcs.shape[1]):
+			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+			cmod_pc_corr[i] = nan_pearsonr(subject_pcs[:,i],r_mod.resid_response)[0]
+			if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
+				mod_perf_corr[i] = nan_pearsonr(task_perf,subject_pcs[:,i])[0]
+				cmod_perf_corr[i] = nan_pearsonr(subject_pcs[:,i],r_perf.resid_response)[0]
+		
+		mod_pc_corr_result = pearsonr(mod_pc_corr,mean_pc)
+		control_mod_pc_corr_result = pearsonr(cmod_pc_corr,mean_pc)
+		print 'raw_mod_pc_corr', mod_pc_corr_result
+		print 'controled_mod_pc_corr', control_mod_pc_corr_result
+		if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
+			print np.isclose(0.0,pearsonr(r_perf.resid_response,subject_motion)[0])
+			print 'raw_perf_pc_corr', nan_pearsonr(mod_perf_corr,mean_pc)
+			print 'controled_perf_pc_corr', nan_pearsonr(cmod_perf_corr,mean_pc)
+		# PC of connector nodes is not correlated with motion
 
 def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']):
 	global hcp_subjects
@@ -847,118 +987,127 @@ def mediation(n=0):
 	project='hcp'
 	tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
-	for task in tasks:
-		task = 'REST'
-		print task
-		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
-		static_results = graph_metrics(subjects,task,atlas)
-		matrices = static_results['matrices']
-		subject_pcs = static_results['subject_pcs']
-		subject_mods = static_results['subject_mods']
-		mod_pc_corr = np.zeros(subject_pcs.shape[1])
-		for i in range(subject_pcs.shape[1]):
-			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
-		locality_df = pd.DataFrame()
-		e_tresh = np.percentile(mean_conn,90)
-		for i in range(62):
-			real_t = scipy.stats.ttest_ind(np.abs(m[i][np.argwhere(mean_conn[i]>e_tresh)].reshape(-1)),np.abs(m[i][np.argwhere(mean_conn[i]<e_tresh)].reshape(-1)))[0]
-			locality_df = locality_df.append({'t_type':'real','t':real_t},ignore_index=True)
-			fake_t = []
-			for j in range(62):
-				fake_t.append(scipy.stats.ttest_ind(np.abs(m[j][np.argwhere(mean_conn[i]>e_tresh)].reshape(-1)),np.abs(m[j][np.argwhere(mean_conn[i]<e_tresh)].reshape(-1)))[0])
-			locality_df = locality_df.append({'t_type':'null','t':np.nanmean(fake_t)},ignore_index=True)
-		locality_df.dropna(inplace=True)
-		print scipy.stats.ttest_ind(locality_df.t[locality_df.t_type=='real'],locality_df.t[locality_df.t_type=='null'])
-		mod_edge_corr = np.zeros((264,264))
-		for i,j in combinations(range(264),2):
-			print i
-			rr = nan_pearsonr(matrices[:,i,j],subject_mods)
-			mod_edge_corr[i,j] = rr[0]
-			mod_edge_corr[j,i] = rr[0]
-			# mod_pc_corr[i] = nan_pearsonr(task_perf,subject_pcs[:,i])[0]
-		# threshes = [0.1,.2,0.25,.3]
-		# threshes = [.1]
-		# mean_pc = np.nanmean(subject_pcs,axis=0)
-		# for thresh in threshes:
-		# 	df = pd.DataFrame()
-		# 	for i in range(len(subject_pcs)):
-		# 		for pi,p in enumerate(subject_pcs[i]):
-		# 			if mod_pc_corr[pi] < thresh:
-		# 				continue
-		# 			df = df.append({'node':pi,'Q':subject_mods[i],'PC':p},ignore_index=True)
-		# 			# df = df.append({'node':pi,'Performance':task_perf[i],'PC':p},ignore_index=True)
-		# 	sns.lmplot('PC','Q',df,hue='node',order=2,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
-		# 	sns.plt.xlim([0,.75])
-		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_2.pdf'%(thresh))
-		# 	sns.plt.close()
-		# 	sns.lmplot('PC','Q',df,hue='node',order=3,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
-		# 	sns.plt.xlim([0,.75])
-		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_3.pdf'%(thresh))
-		# 	sns.plt.close()
-		# 	sns.lmplot('PC','Q',df,hue='node',lowess=True,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
-		# 	sns.plt.xlim([0,.75])
-		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_lowless.pdf'%(thresh))
-		# 	sns.plt.close()
-		# 	sns.lmplot('PC','Q',df,order=2,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
-		# 	sns.plt.xlim([0,.75])
-		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_2.pdf'%(thresh))
-		# 	sns.plt.close()
-		# 	sns.lmplot('PC','Q',df,order=3,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
-		# 	sns.plt.xlim([0,.75])
-		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_3.pdf'%(thresh))
-		# 	sns.plt.close()
-		# 	sns.lmplot('PC','Q',df,lowess=True,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
-		# 	sns.plt.xlim([0,.75])
-		# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_lowless.pdf'%(thresh))
-		# 	sns.plt.close()
+	# for task in tasks:
+	task = 'REST'
+	print task
+	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+	static_results = graph_metrics(subjects,task,atlas)
+	matrices = static_results['matrices']
+	subject_pcs = static_results['subject_pcs']
+	subject_mods = static_results['subject_mods']
+	mod_pc_corr = np.zeros(subject_pcs.shape[1])
+	for i in range(subject_pcs.shape[1]):
+		mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
 
-		subject_pcs[np.isnan(subject_pcs)] = 0.0
-		result = np.zeros((264,264,264))
-		result = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new.npy')
-		pool = Pool(40)
-		for n in range(47,264):
-			print n
-			sys.stdout.flush()
-			variables =  []
-			for i,j in combinations(range(264),2):
-				variables.append(pd.DataFrame(data={'pc':subject_pcs[:,n],'weight':matrices[:,i,j],'q':subject_mods},index=range(len(subject_pcs))))
-			results = pool.map(multi_med,variables)
-			for r,i in zip(results,combinations(range(264),2)):
-				result[n,i[0],i[1]] = r
-				result[n,i[1],i[0]] = r
-			np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_0.npy',result)
-		1/0
-		# pool = Pool(40)
-		# results = pool.map(individual_graph_analyes_wc,matrices)
-		# subject_pcs = []
-		# subject_wmds = []
-		# subject_mods = []
-		# subject_coms = []
-		# for r in results:
-		# 	subject_mods.append(np.nanmean(r[0]))
-		# 	subject_pcs.append(r[1])
-		# 	subject_wmds.append(r[2])
-		# 	subject_coms.append(r[3])
-		# subject_pcs = np.array(subject_pcs)
-		# subject_wmds = np.array(subject_wmds)
-		# subject_mods = np.array(subject_mods)
-		# subject_coms = np.array(subject_coms)
-		# mean_pc = np.nanmean(subject_pcs,axis=0)
-		# mean_wmd = np.nanmean(subject_wmds,axis=0)
-		# mod_pc_corr = np.zeros(subject_pcs.shape[1])
-		# for i in range(subject_pcs.shape[1]):
-		# 	mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
-		# community_med_rs = []
-		# for i in range(264):
-		# 	if mod_pc_corr[0] <= 0.0:
-		# 		continue
-		# 	data = pd.DataFrame(data={'pc':subject_pcs[:,i],'weight':subject_coms,'q':subject_mods},index=range(len(subject_pcs)))
-		# 	outcome_model = sm.OLS.from_formula("q ~ weight + pc", data)
-		# 	mediator_model = sm.OLS.from_formula("weight ~ pc", data)
-		# 	community_med_rs.append(np.mean(Mediation(outcome_model, mediator_model, "pc", "weight").fit(n_rep=10).ACME_avg))
-		# plot_df = pd.DataFrame(data={'Mediation Values':np.array(community_med_rs),'PC-Q R':mod_pc_corr)	
-		plot_df = pd.DataFrame(data={'Community Size':subject_coms,'Q':subject_mods})
-		sns.regplot('Community Size', 'Q',plot_df,robust=True,fit_reg=True)
+	mean_conn = np.nanmean(matrices,axis=0)
+	m = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_0.npy')
+	e_tresh = np.percentile(mean_conn,90)
+	locality_df = pd.DataFrame()
+	for i in range(193):
+		real_t = scipy.stats.ttest_ind(np.abs(m[i][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1)),np.abs(m[i][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1)))[0]
+		# real_t = scipy.stats.ttest_ind(m[i][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1),m[i][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1))[0]
+		# fake_t = []
+		# for j in range(194):
+			# fake_t.append(scipy.stats.ttest_ind(np.abs(m[j][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1)),np.abs(m[j][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1)))[0])
+			# fake_t.append(scipy.stats.ttest_ind(m[j][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1),m[j][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1))[0])
+		if mod_pc_corr[i] > 0.0:
+			locality_df = locality_df.append({'Q+':True,'t_type':'real','t':real_t},ignore_index=True)
+		else:
+			locality_df = locality_df.append({'Q+':False,'t_type':'real','t':real_t},ignore_index=True)
+
+		# locality_df = locality_df.append({'Q+':'N/A','t_type':'null','t':np.nanmean(fake_t)},ignore_index=True)
+	locality_df.dropna(inplace=True)
+	# print scipy.stats.ttest_ind(locality_df.t[locality_df.t_type=='real'],locality_df.t[locality_df.t_type=='null'])
+	print scipy.stats.ttest_ind(locality_df.t[locality_df['Q+']==True],locality_df.t[locality_df['Q+']==False])
+	mod_edge_corr = np.zeros((264,264))
+	for i,j in combinations(range(264),2):
+		print i
+		rr = nan_pearsonr(matrices[:,i,j],subject_mods)
+		mod_edge_corr[i,j] = rr[0]
+		mod_edge_corr[j,i] = rr[0]
+	# threshes = [0.1,.2,0.25,.3]
+	# threshes = [.1]
+	# mean_pc = np.nanmean(subject_pcs,axis=0)
+	# for thresh in threshes:
+	# 	df = pd.DataFrame()
+	# 	for i in range(len(subject_pcs)):
+	# 		for pi,p in enumerate(subject_pcs[i]):
+	# 			if mod_pc_corr[pi] < thresh:
+	# 				continue
+	# 			df = df.append({'node':pi,'Q':subject_mods[i],'PC':p},ignore_index=True)
+	# 			# df = df.append({'node':pi,'Performance':task_perf[i],'PC':p},ignore_index=True)
+	# 	sns.lmplot('PC','Q',df,hue='node',order=2,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+	# 	sns.plt.xlim([0,.75])
+	# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_2.pdf'%(thresh))
+	# 	sns.plt.close()
+	# 	sns.lmplot('PC','Q',df,hue='node',order=3,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+	# 	sns.plt.xlim([0,.75])
+	# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_3.pdf'%(thresh))
+	# 	sns.plt.close()
+	# 	sns.lmplot('PC','Q',df,hue='node',lowess=True,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+	# 	sns.plt.xlim([0,.75])
+	# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_%s_lowless.pdf'%(thresh))
+	# 	sns.plt.close()
+	# 	sns.lmplot('PC','Q',df,order=2,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+	# 	sns.plt.xlim([0,.75])
+	# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_2.pdf'%(thresh))
+	# 	sns.plt.close()
+	# 	sns.lmplot('PC','Q',df,order=3,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+	# 	sns.plt.xlim([0,.75])
+	# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_3.pdf'%(thresh))
+	# 	sns.plt.close()
+	# 	sns.lmplot('PC','Q',df,lowess=True,truncate=True,scatter=False,scatter_kws={'label':'Order:1','color':'y'})
+	# 	sns.plt.xlim([0,.75])
+	# 	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/pc_mod_regress_mean_%s_lowless.pdf'%(thresh))
+	# 	sns.plt.close()
+
+	subject_pcs[np.isnan(subject_pcs)] = 0.0
+	result = np.zeros((264,264,264))
+	result = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new.npy')
+	pool = Pool(40)
+	for n in range(47,264):
+		print n
+		sys.stdout.flush()
+		variables =  []
+		for i,j in combinations(range(264),2):
+			variables.append(pd.DataFrame(data={'pc':subject_pcs[:,n],'weight':matrices[:,i,j],'q':subject_mods},index=range(len(subject_pcs))))
+		results = pool.map(multi_med,variables)
+		for r,i in zip(results,combinations(range(264),2)):
+			result[n,i[0],i[1]] = r
+			result[n,i[1],i[0]] = r
+		np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_0.npy',result)
+	1/0
+	# pool = Pool(40)
+	# results = pool.map(individual_graph_analyes_wc,matrices)
+	# subject_pcs = []
+	# subject_wmds = []
+	# subject_mods = []
+	# subject_coms = []
+	# for r in results:
+	# 	subject_mods.append(np.nanmean(r[0]))
+	# 	subject_pcs.append(r[1])
+	# 	subject_wmds.append(r[2])
+	# 	subject_coms.append(r[3])
+	# subject_pcs = np.array(subject_pcs)
+	# subject_wmds = np.array(subject_wmds)
+	# subject_mods = np.array(subject_mods)
+	# subject_coms = np.array(subject_coms)
+	# mean_pc = np.nanmean(subject_pcs,axis=0)
+	# mean_wmd = np.nanmean(subject_wmds,axis=0)
+	# mod_pc_corr = np.zeros(subject_pcs.shape[1])
+	# for i in range(subject_pcs.shape[1]):
+	# 	mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+	# community_med_rs = []
+	# for i in range(264):
+	# 	if mod_pc_corr[0] <= 0.0:
+	# 		continue
+	# 	data = pd.DataFrame(data={'pc':subject_pcs[:,i],'weight':subject_coms,'q':subject_mods},index=range(len(subject_pcs)))
+	# 	outcome_model = sm.OLS.from_formula("q ~ weight + pc", data)
+	# 	mediator_model = sm.OLS.from_formula("weight ~ pc", data)
+	# 	community_med_rs.append(np.mean(Mediation(outcome_model, mediator_model, "pc", "weight").fit(n_rep=10).ACME_avg))
+	# plot_df = pd.DataFrame(data={'Mediation Values':np.array(community_med_rs),'PC-Q R':mod_pc_corr)	
+	plot_df = pd.DataFrame(data={'Community Size':subject_coms,'Q':subject_mods})
+	sns.regplot('Community Size', 'Q',plot_df,robust=True,fit_reg=True)
 
 def sm_null():
 	try:
@@ -1138,7 +1287,6 @@ def specificity():
 		for i in range(subject_wmds.shape[1]):
 			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
 		for hub_node in hub_nodes:
-			print hub_node
 			if hub_node == 'PC':
 				pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
 				connector_nodes = np.where(mod_pc_corr>0.0)[0]
@@ -1899,12 +2047,12 @@ def pc_classifier(t):
 
 def predict(v):
 	pvals = v[0]
-	train = v[1] 
-	t = v[2]
-	task_perf = v[3] 
-	train = np.ones(len(train)).astype(bool)
+	# train = v[1] 
+	t = v[1]
+	task_perf = v[2] 
+	train = np.ones(len(pvals)).astype(bool)
 	train[t] = False
-	clf = linear_model.LinearRegression()
+	clf = linear_model.LinearRegression(fit_intercept=True)
 	clf.fit(pvals[train],task_perf[train])
 	return clf.predict(pvals[t])
 
@@ -1944,8 +2092,15 @@ def plot_results(data,x,y,save_str):
 		plt.savefig(save_str,dpi=3600)
 		plt.close()
 
+def test_subs(task,atlas='power'):
+	tsubjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+	tnsubjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_scrub_.2.npy' %('hcp',task,atlas))
+	print 'test_subs', (tnsubjects == tsubjects).all()
+
 def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']):
-	tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']
+	import warnings
+	warnings.filterwarnings('ignore')
+	tasks=['WM','RELATIONAL','SOCIAL','LANGUAGE']
 	project='hcp'
 	atlas='power'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels('power')
@@ -1959,23 +2114,29 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		"""
 		see which graph metrics correlate with modularity and performance
 		"""
-		subjects = np.array(hcp_subjects).copy()
-		subjects = list(subjects)
-		subjects = remove_missing_subjects(subjects,'REST',atlas)
+		# subjects = np.array(hcp_subjects).copy()
+		# subjects = list(subjects)
+		# subjects = remove_missing_subjects(subjects,'REST',atlas)
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp','REST',atlas))
 		assert (subjects == np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%('REST',atlas))).all()
 		rest_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%('REST',atlas))
-		rest_results = graph_metrics(rest_subjects,'REST',atlas,run_version='fz')
+		rest_results = graph_metrics(rest_subjects,'REST',atlas,run_version='scrub_.2')
 		rest_subject_pcs = rest_results['subject_pcs'].copy()
 		rest_matrices = rest_results['matrices']
 		rest_subject_mods = rest_results['subject_mods']
 		rest_subject_wmds = rest_results['subject_wmds']
 		print task
-		subjects = np.array(hcp_subjects).copy()
-		subjects = list(subjects)
-		subjects = remove_missing_subjects(subjects,task,atlas)
+		test_subs(task)
+		# subjects = np.array(hcp_subjects).copy()
+		# subjects = list(subjects)
+		# subjects = remove_missing_subjects(subjects,task,atlas)
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
 		assert (subjects == np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))).all()
 		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))
-		static_results = graph_metrics(subjects,task,atlas,run_version='fz')
+		subject_motion = []
+		for subject in subjects:
+			subject_motion.append(get_sub_motion(subject,task))
+		static_results = graph_metrics(subjects,task,atlas,run_version='scrub_.2')
 		subject_pcs = static_results['subject_pcs'].copy()
 		matrices = static_results['matrices']
 		subject_mods = static_results['subject_mods']
@@ -2017,25 +2178,28 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			subject_mods = np.delete(subject_mods,to_delete)
 			subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
 			task_perf = np.delete(task_perf,to_delete)
+			subject_motion = np.delete(subject_motion,to_delete)
 		task_perf = scipy.stats.zscore(task_perf)
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
 		rest_subject_pcs[np.isnan(rest_subject_pcs)] = 0.0
 		subject_wmds[np.isnan(subject_wmds)] = 0.0
+		# task_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit().resid_response
+
 		"""
 		prediction / cross validation
 		"""
 
-		mod_diff = subject_mods - rest_subject_mods
-		pvals = np.array(subject_mods - rest_subject_mods)
-		pvals = pvals.reshape(pvals.shape[0],1)
-		vs = []
-		for t in range(pvals.shape[0]):
-			train = np.ones(len(pvals)).astype(bool)
-			train[t] = False
-			vs.append([pvals,train,t,task_perf])
-		pool = Pool(20)
-		q_diff_prediction = pool.map(predict,vs)
-		print 'Q Difference Prediction of Performance, LOO: ', pearsonr(q_diff_prediction,task_perf)
+		# mod_diff = subject_mods - rest_subject_mods
+		# pvals = np.array(subject_mods - rest_subject_mods)
+		# pvals = pvals.reshape(pvals.shape[0],1)
+		# vs = []
+		# for t in range(pvals.shape[0]):
+		# 	train = np.ones(len(pvals)).astype(bool)
+		# 	train[t] = False
+		# 	vs.append([pvals,train,t,task_perf])
+		# pool = Pool(20)
+		# q_diff_prediction = pool.map(predict,vs)
+		# print 'Q Difference Prediction of Performance, LOO: ', pearsonr(np.array(q_diff_prediction).reshape(-1),task_perf)
 
 		mean_pc = []
 		mean_local_pc = []
@@ -2052,24 +2216,29 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		mean_local_wmd = np.array(mean_local_wmd)
 
 		pvals = np.array([mean_pc-mean_local_pc,mean_local_wmd-mean_wmd]).transpose()
+		pvals = scipy.stats.zscore(pvals,axis=0)
 		vs = []
 		for t in range(pvals.shape[0]):
-			train = np.ones(len(pvals)).astype(bool)
-			train[t] = False
-			vs.append([pvals,train,t,task_perf])
+			# train = np.ones(len(pvals)).astype(bool)
+			# train[t] = False
+			# vs.append([pvals,train,t,task_perf])
+			vs.append([pvals.copy(),t,task_perf])
 		pool = Pool(20)
 		mean_nodal_prediction = pool.map(predict,vs)
 		print 'Mean Nodal Prediction of Performance, LOO: ', pearsonr(np.array(mean_nodal_prediction).reshape(-1),task_perf)
+		continue
 
 		pvals = np.concatenate([subject_pcs,subject_wmds],axis=1)
+		pvals = scipy.stats.zscore(pvals,axis=0)
 		vs = []
 		for t in range(pvals.shape[0]):
-			train = np.ones(len(pvals)).astype(bool)
-			train[t] = False
-			vs.append([pvals,train,t,task_perf])
+			# train = np.ones(len(pvals)).astype(bool)
+			# train[t] = False
+			# vs.append([pvals,train,t,task_perf])
+			vs.append([pvals.copy(),t,task_perf])
 		pool = Pool(20)
 		nodal_prediction = pool.map(predict,vs)
-		print 'Nodal (PC and WMD scores) Prediction of Performance, LOO: ', pearsonr(nodal_prediction,task_perf)
+		print 'Nodal (PC and WMD scores) Prediction of Performance, LOO: ', pearsonr(np.array(nodal_prediction).reshape(-1),task_perf)
 		mod_diff = subject_mods - rest_subject_mods
 		# pvals = np.array(subject_mods - rest_subject_mods)
 		# pvals = pvals.reshape(pvals.shape[0],1)
@@ -2155,6 +2324,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		pvals[:,3] = np.nanmean(subject_pcs[:,predict_nodes],axis=1)-np.nanmean(rest_subject_pcs[:,predict_nodes],axis=1)
 		pvals[:,4] = np.nanmean(subject_wmds[:,wmd_local_predict_nodes],axis=1)-np.nanmean(rest_subject_wmds[:,wmd_local_predict_nodes],axis=1)
 		vs = []
+		pvals = scipy.stats.zscore(pvals,axis=0)
 		for t in range(pvals.shape[0]):
 			train = np.ones(len(pvals)).astype(bool)
 			train[t] = False
@@ -2166,6 +2336,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		pvals = subject_mods
 		pvals = pvals.reshape(pvals.shape[0],1)
 		vs = []
+		pvals = scipy.stats.zscore(pvals,axis=0)
 		for t in range(pvals.shape[0]):
 			train = np.ones(len(pvals)).astype(bool)
 			train[t] = False
@@ -2574,6 +2745,12 @@ def airlines_RC(return_graph=False):
 		latitudes.append(airports[6][airports[0]==int(graph.vs['name'][v])])
 		longitudes.append(airports[7][airports[0]==int(graph.vs['name'][v])])
 
+# task = 'WM'
+# atlas = 'power'
+# subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+# graph_metrics(subjects,task,atlas,project='hcp',run_version='fz_scrubbed',run=True)
+# motion_across_tasks()
+performance_across_tasks()
 # structural_attacks(networks=['macaque','c_elegans','power_grid','air_traffic'])
 # targeted_attacks()
 # performance_across_tasks(atlas='power',tasks=[sys.argv[1]])
@@ -2584,7 +2761,7 @@ def airlines_RC(return_graph=False):
 """
 SGE Inputs
 """
-mediation()
+# mediation()
 if len(sys.argv) > 1:
 	if sys.argv[1] == 'perf':
 		performance_across_tasks()
@@ -2604,13 +2781,18 @@ if len(sys.argv) > 1:
 		matrices = static_results['matrices']
 		pc_edge_corr = pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/hcp_%s_power_pc_edge_corr_z.npy' %(task))
 	if sys.argv[1] == 'graph_metrics':
-		subjects = remove_missing_subjects(list(np.array(hcp_subjects).copy()),sys.argv[2],sys.argv[3])
-		graph_metrics(subjects,task=sys.argv[2],atlas=sys.argv[3],run=True)
+		# subjects = remove_missing_subjects(list(np.array(hcp_subjects).copy()),sys.argv[2],sys.argv[3])
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',sys.argv[2],sys.argv[3]))
+		graph_metrics(subjects,task=sys.argv[2],atlas=sys.argv[3],run_version='scrub_.2',run=True)
 	if sys.argv[1] == 'make_matrix':
 		subject = str(sys.argv[2])
 		task = str(sys.argv[3])
 		atlas = str(sys.argv[4])
 		make_static_matrix(subject,task,'hcp',atlas)
+	if sys.argv[1] == 'calc_motion':
+		subject = str(sys.argv[2])
+		task = str(sys.argv[3])
+		run_fd(subject,task)
 
 """
 Methods
