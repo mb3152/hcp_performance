@@ -318,14 +318,20 @@ def null_all_individual_graph_analyes(matrix):
 	graph = brain_graphs.brain_graph(graph)
 	return (graph.community.modularity,np.array(graph.pc),np.array(graph.wmd))	
 
-def individual_graph_analyes_wc(matrix):
+def individual_graph_analyes_wc(variables):
+	subject = variables[0]
+	print subject
+	atlas = variables[1]
+	task = variables[2]
+	s_matrix = variables[3]	
 	pc = []
 	mod = []
 	wmd = []
 	memlen = []
 	for cost in np.array(range(5,16))*0.01:
-		temp_matrix = matrix.copy()
+		temp_matrix = s_matrix.copy()
 		graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True,mst=True)
+		assert np.diff([cost,graph.density()])[0] < .01
 		del temp_matrix
 		graph = graph.community_infomap(edge_weights='weight')
 		graph = brain_graphs.brain_graph(graph)
@@ -334,7 +340,7 @@ def individual_graph_analyes_wc(matrix):
 		mod.append(graph.community.modularity)
 		memlen.append(len(graph.community.sizes()))
 		del graph
-	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0),np.nanmean(memlen))
+	return (mod,np.nanmean(pc,axis=0),np.nanmean(wmd,axis=0),np.nanmean(memlen),subject)
 
 def individual_graph_analyes(variables):
 	subject = variables[0]
@@ -396,42 +402,65 @@ def check_normalize(subjects,task,atlas='power'):
 			np.fill_diagonal(f,0.0)
 			f[np.isnan(f)] = 0.0
 			f = np.arctanh(f)
+			if np.isfinite(f).all() == False:
+				continue
 			s_matrix.append(f.copy())
-		if len(s_matrix) == 0:
-			continue
 		s_matrix = np.nanmean(s_matrix,axis=0)
+		assert s_matrix.shape == (264,264)
 		for cost in np.array(range(5,16))*0.01:
 			temp_matrix = s_matrix.copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
 			assert np.diff([cost,graph.density()])[0] < .005
-			assert np.min(graph.get_adjacency(attribute='weight').data) >= 0.0
 
 def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False):
 	"""
 	run graph metrics or load them
 	"""
 	if run == False:
-		done_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version)) 
-		assert (done_subjects == subjects).all() #make sure you are getting subjects / subjects order you wanted and ran last time.
+		# done_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version)) 
+		# assert (done_subjects == subjects).all() #make sure you are getting subjects / subjects order you wanted and ran last time.
 		subject_pcs = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pcs_%s.npy' %(project,task,atlas,run_version)) 
 		subject_wmds = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmds_%s.npy' %(project,task,atlas,run_version)) 
 		subject_mods = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_mods_%s.npy' %(project,task,atlas,run_version)) 
+		subject_communities = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_coms_%s.npy' %(project,task,atlas,run_version)) 
 		matrices = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_matrices_%s.npy' %(project,task,atlas,run_version)) 
 		thresh_matrices = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_z_matrices_%s.npy' %(project,task,atlas,run_version))
+		finished_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version))
 	elif run == True:
+		finished_subjects = []
 		variables = []
 		matrices = []
 		thresh_matrices = []
 		for subject in subjects:
 			s_matrix = []
-			files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task))
-			# files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
+			# files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task)) # FOR SCRUBBING ONLY
+			files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
 			for f in files:
+				# FOR SCRUBBING ONLY
+				# dis_file = run_fd(subject,'_'.join(f.split('/')[-1].split('_')[2:5]))
+				# remove_array = np.zeros(len(dis_file))
+				# for i,fdf in enumerate(dis_file):
+				# 	if fdf > .2:
+				# 		remove_array[i] = 1
+				# 		if i == 0:
+				# 			remove_array[i+1] = 1
+				# 			continue
+				# 		if i == len(dis_file)-1:
+				# 			remove_array[i-1] = 1
+				# 			continue
+				# 		remove_array[i-1] = 1
+				# 		remove_array[i+1] = 1
+				# if len(remove_array[remove_array==1])/float(len(remove_array)) > .75:
+				# 	continue
 				f = np.load(f)
 				np.fill_diagonal(f,0.0)
 				f[np.isnan(f)] = 0.0
+				if np.isfinite(f).all() == False:
+					continue
 				f = np.arctanh(f)
 				s_matrix.append(f.copy())
+			if len(s_matrix) == 0:
+				continue
 			s_matrix = np.nanmean(s_matrix,axis=0)
 			variables.append([subject,atlas,task,s_matrix.copy()])
 			num_nodes = s_matrix.shape[0]
@@ -439,37 +468,44 @@ def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False):
 			thresh_matrix = scipy.stats.zscore(thresh_matrix.reshape(-1)).reshape((num_nodes,num_nodes))
 			thresh_matrices.append(thresh_matrix.copy())
 			matrices.append(s_matrix.copy())
+			finished_subjects.append(subject)
 		subject_mods = [] #individual subject modularity values
 		subject_pcs = [] #subjects PCs
 		subject_wmds = []
+		subject_communities = []
+		assert len(variables) == len(finished_subjects)
 		print 'Running Graph Theory Analyses'
 		from multiprocessing import Pool
-		pool = Pool(10)
-		results = pool.map(individual_graph_analyes,variables)		
-		for r,s in zip(results,subjects):
+		pool = Pool(5)
+		results = pool.map(individual_graph_analyes_wc,variables)		
+		for r,s in zip(results,finished_subjects):
 			subject_mods.append(np.nanmean(r[0]))
 			subject_pcs.append(r[1])
 			subject_wmds.append(r[2])
-			assert r[3] == s #make sure it returned the order of subjects/results correctly
+			subject_communities.append(r[3])
+			assert r[4] == s #make sure it returned the order of subjects/results correctly
 		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pcs_%s.npy' %(project,task,atlas,run_version),np.array(subject_pcs))
 		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmds_%s.npy' %(project,task,atlas,run_version),np.array(subject_wmds))
 		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_mods_%s.npy' %(project,task,atlas,run_version),np.array(subject_mods))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version),np.array(subjects))
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version),np.array(finished_subjects))
 		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_matrices_%s.npy'%(project,task,atlas,run_version),np.array(matrices))
+		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_coms_%s.npy' %(project,task,atlas,run_version),np.array(subject_communities)) 
 		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_z_matrices_%s.npy'%(project,task,atlas,run_version),np.array(thresh_matrices))
 	subject_mods = np.array(subject_mods)
 	subject_pcs = np.array(subject_pcs)
 	subject_wmds = np.array(subject_wmds)
+	subject_communities = np.array(subject_communities)
 	matrices = np.array(matrices)
 	thresh_matrices = np.array(thresh_matrices)
 	results = {}
 	results['subject_pcs'] = subject_pcs
 	results['subject_mods'] = subject_mods
 	results['subject_wmds'] = subject_wmds
+	results['subject_communities'] = subject_communities
 	results['matrices'] = matrices
 	del matrices
 	results['z_scored_matrices'] = thresh_matrices
-	results['subjects'] = subjects
+	results['subjects'] = finished_subjects
 	del thresh_matrices
 	return results
 
@@ -590,23 +626,22 @@ def all_motion(tasks,atlas='power'):
 			except:
 				print subject,task
 
-def motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']):
+def motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz_wc',control_com=False,control_motion=False):
 	global hcp_subjects
-	tasks = ['WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','REST','MOTOR']
-	# tasks = ['WM','REST','RELATIONAL','SOCIAL','LANGUAGE',]
-	# tasks = ['REST']
+	tasks = ['REST','WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','MOTOR']
 	project='hcp'
 	atlas = 'power'
 	for task in tasks:
 		print task
-		test_subs(task)
-		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
-		static_results = graph_metrics(subjects,task,atlas,run_version='scrub_.2')
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %('hcp',task,atlas,run_version))
+		static_results = graph_metrics(subjects,task,atlas,run_version=run_version)
 		subject_pcs = static_results['subject_pcs']
 		subject_mods = static_results['subject_mods']
 		subject_wmds = static_results['subject_wmds']
+		subject_communities = static_results['subject_communities']
 		matrices = static_results['matrices']
 		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
+		subjects = static_results['subjects']
 		subject_motion = []
 		for subject in subjects:
 			subject_motion.append(get_sub_motion(subject,task))
@@ -624,6 +659,7 @@ def motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOT
 			to_delete = np.isnan(subject_motion).copy()
 			to_delete = np.where(to_delete==True)
 		subject_pcs = np.delete(subject_pcs,to_delete,axis=0)
+		subject_communities = np.delete(subject_communities,to_delete)
 		matrices = np.delete(matrices,to_delete,axis=0)
 		subject_mods = np.delete(subject_mods,to_delete)
 		subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
@@ -634,17 +670,28 @@ def motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOT
 		cmod_pc_corr = np.zeros(subject_pcs.shape[1])
 		cmod_perf_corr = np.zeros(subject_pcs.shape[1])
 		mod_perf_corr = np.zeros(subject_pcs.shape[1])
-		r_mod = sm.GLM(subject_mods,sm.add_constant(subject_motion)).fit()
+		if control_com == True and control_motion == True:
+			model_vars = np.array([subject_motion,subject_communities]).transpose()
+			r_mod = sm.GLM(subject_mods,sm.add_constant(model_vars)).fit()
+		if control_com == True and control_motion == False:
+			r_mod = sm.GLM(subject_mods,sm.add_constant(subject_communities)).fit()
+		if control_com == False and control_motion == True:
+			r_mod = sm.GLM(subject_mods,sm.add_constant(subject_motion)).fit()
 		print np.isclose(0.0,pearsonr(r_mod.resid_response,subject_motion)[0])
 		if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
-			r_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit()
+			if control_com == True and control_motion == True:
+				model_vars = np.array([subject_motion,subject_communities]).transpose()
+				r_perf = sm.GLM(task_perf,sm.add_constant(model_vars)).fit()
+			if control_com == True and control_motion == False:
+				r_perf = sm.GLM(task_perf,sm.add_constant(subject_communities)).fit()
+			if control_com == False and control_motion == True:
+				r_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit()
 		for i in range(subject_pcs.shape[1]):
 			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
 			cmod_pc_corr[i] = nan_pearsonr(subject_pcs[:,i],r_mod.resid_response)[0]
 			if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
 				mod_perf_corr[i] = nan_pearsonr(task_perf,subject_pcs[:,i])[0]
 				cmod_perf_corr[i] = nan_pearsonr(subject_pcs[:,i],r_perf.resid_response)[0]
-		
 		mod_pc_corr_result = pearsonr(mod_pc_corr,mean_pc)
 		control_mod_pc_corr_result = pearsonr(cmod_pc_corr,mean_pc)
 		print 'raw_mod_pc_corr', mod_pc_corr_result
@@ -2097,12 +2144,12 @@ def test_subs(task,atlas='power'):
 	tnsubjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_scrub_.2.npy' %('hcp',task,atlas))
 	print 'test_subs', (tnsubjects == tsubjects).all()
 
-def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL']):
+def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz_wc',control_com=False,control_motion=False):
 	import warnings
 	warnings.filterwarnings('ignore')
-	tasks=['WM','RELATIONAL','SOCIAL','LANGUAGE']
-	project='hcp'
-	atlas='power'
+	# tasks=['WM','RELATIONAL','SOCIAL','LANGUAGE']
+	# project='hcp'
+	# atlas='power'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels('power')
 	df = pd.DataFrame(columns=['PC','WCD','Task','PCxPerformance','PCxModularity','WCDxPerformance','WCDxModularity'])
 	diff_df = pd.DataFrame(columns=['Task','Modularity_Type','Performance'])
@@ -2111,35 +2158,27 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 	loo_columns= ['Task','Nodal Predicted Performance','Q Predicted Performance','Mean Nodal Predicted Performance','Mean PC Predicted Performance','Mean WCD Predicted Performance','Performance','Mod Diff','PC Q+ Diff','WCD Q+ Diff','PC Q+/Q- Diff','WCD Q+/Q- Diff','Rest Versus Task']
 	loo_df = pd.DataFrame(columns = loo_columns)
 	for task in tasks:
+		print task
 		"""
 		see which graph metrics correlate with modularity and performance
 		"""
-		# subjects = np.array(hcp_subjects).copy()
-		# subjects = list(subjects)
-		# subjects = remove_missing_subjects(subjects,'REST',atlas)
-		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp','REST',atlas))
-		assert (subjects == np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%('REST',atlas))).all()
-		rest_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%('REST',atlas))
-		rest_results = graph_metrics(rest_subjects,'REST',atlas,run_version='scrub_.2')
+		rest_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_%s.npy'%('REST',atlas,run_version))
+		rest_results = graph_metrics(rest_subjects,'REST',atlas,run_version=run_version)
 		rest_subject_pcs = rest_results['subject_pcs'].copy()
 		rest_matrices = rest_results['matrices']
 		rest_subject_mods = rest_results['subject_mods']
 		rest_subject_wmds = rest_results['subject_wmds']
-		print task
-		test_subs(task)
-		# subjects = np.array(hcp_subjects).copy()
-		# subjects = list(subjects)
-		# subjects = remove_missing_subjects(subjects,task,atlas)
-		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
-		assert (subjects == np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))).all()
-		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_fz.npy'%(task,atlas))
-		subject_motion = []
-		for subject in subjects:
-			subject_motion.append(get_sub_motion(subject,task))
-		static_results = graph_metrics(subjects,task,atlas,run_version='scrub_.2')
+		rest_subjects = rest_results['subjects']
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_%s.npy'%(task,atlas,run_version))
+		static_results = graph_metrics(subjects,task,atlas,run_version=run_version)
 		subject_pcs = static_results['subject_pcs'].copy()
 		matrices = static_results['matrices']
 		subject_mods = static_results['subject_mods']
+		subject_communities = static_results['subject_communities']
+		subjects = static_results['subjects']
+		subject_motion = []
+		for subject in subjects:
+			subject_motion.append(get_sub_motion(subject,task))	
 		subject_wmds = static_results['subject_wmds']
 		rest_idx = []
 		for i,s in enumerate(rest_subjects):
@@ -2167,23 +2206,30 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		"""
 		predict performance using high and low PCS values. 
 		"""
-		if task != 'REST':
-			to_delete = np.isnan(task_perf).copy()
-			to_delete = np.where(to_delete==True)
-			subject_pcs = np.delete(subject_pcs,to_delete,axis=0)
-			rest_subject_pcs = np.delete(rest_subject_pcs[rest_idx],to_delete,axis=0)
-			rest_subject_wmds = np.delete(rest_subject_wmds[rest_idx],to_delete,axis=0)
-			rest_subject_mods = np.delete(rest_subject_mods[rest_idx],to_delete,axis=0)
-			matrices = np.delete(matrices,to_delete,axis=0)
-			subject_mods = np.delete(subject_mods,to_delete)
-			subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
-			task_perf = np.delete(task_perf,to_delete)
-			subject_motion = np.delete(subject_motion,to_delete)
+		to_delete = np.isnan(task_perf).copy()
+		to_delete = np.where(to_delete==True)
+		subject_pcs = np.delete(subject_pcs,to_delete,axis=0)
+		rest_subject_pcs = np.delete(rest_subject_pcs[rest_idx],to_delete,axis=0)
+		rest_subject_wmds = np.delete(rest_subject_wmds[rest_idx],to_delete,axis=0)
+		rest_subject_mods = np.delete(rest_subject_mods[rest_idx],to_delete,axis=0)
+		matrices = np.delete(matrices,to_delete,axis=0)
+		subject_mods = np.delete(subject_mods,to_delete)
+		subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
+		task_perf = np.delete(task_perf,to_delete)
+		subject_motion = np.delete(subject_motion,to_delete)
+		subject_communities = np.delete(subject_communities,to_delete)
 		task_perf = scipy.stats.zscore(task_perf)
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
 		rest_subject_pcs[np.isnan(rest_subject_pcs)] = 0.0
 		subject_wmds[np.isnan(subject_wmds)] = 0.0
-		# task_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit().resid_response
+
+		if control_com == True and control_motion == True:
+			model_vars = np.array([subject_motion,subject_communities]).transpose()
+			task_perf = sm.GLM(task_perf,sm.add_constant(model_vars)).fit().resid_response
+		if control_com == True and control_motion == False:
+			task_perf = sm.GLM(task_perf,sm.add_constant(subject_communities)).fit().resid_response
+		if control_com == False and control_motion == True:
+			task_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit().resid_response
 
 		"""
 		prediction / cross validation
@@ -2762,6 +2808,33 @@ def airlines_RC(return_graph=False):
 SGE Inputs
 """
 # mediation()
+# atlas = 'power'
+# tasks = ['WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','MOTOR','REST']
+# for task in tasks:
+# 	print task
+# 	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+# 	for subject in subjects:
+# 		s_matrix = []
+# 		files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task))
+# 		# files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
+# 		if len(files) < 2:
+# 			print subject,task
+# 			1/0
+# 		for f in files:
+# 			f = np.load(f)
+# 			np.fill_diagonal(f,0.0)
+# 			f[np.isnan(f)] = 0.0
+# 			f = np.arctanh(f)
+# 			if np.isfinite(f).all() == False:
+# 				continue
+# 			s_matrix.append(f.copy())
+# 		s_matrix = np.nanmean(s_matrix,axis=0)
+# 		assert s_matrix.shape == (264,264)
+# 		for cost in np.array(range(5,16))*0.01:
+# 			temp_matrix = s_matrix.copy()
+# 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
+# 			assert np.diff([cost,graph.density()])[0] < .005
+
 if len(sys.argv) > 1:
 	if sys.argv[1] == 'perf':
 		performance_across_tasks()
@@ -2783,7 +2856,7 @@ if len(sys.argv) > 1:
 	if sys.argv[1] == 'graph_metrics':
 		# subjects = remove_missing_subjects(list(np.array(hcp_subjects).copy()),sys.argv[2],sys.argv[3])
 		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',sys.argv[2],sys.argv[3]))
-		graph_metrics(subjects,task=sys.argv[2],atlas=sys.argv[3],run_version='scrub_.2',run=True)
+		graph_metrics(subjects,task=sys.argv[2],atlas=sys.argv[3],run_version='fz_wc',run=True)
 	if sys.argv[1] == 'make_matrix':
 		subject = str(sys.argv[2])
 		task = str(sys.argv[3])
@@ -2793,6 +2866,12 @@ if len(sys.argv) > 1:
 		subject = str(sys.argv[2])
 		task = str(sys.argv[3])
 		run_fd(subject,task)
+	if sys.argv[1] == 'check_norm':
+		atlas = sys.argv[3]
+		task = sys.argv[2]
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',sys.argv[2],sys.argv[3]))
+		check_normalize(subjects,task,atlas='power')
+		print 'done checkin, all good!'
 
 """
 Methods
