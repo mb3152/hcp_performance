@@ -402,8 +402,39 @@ def check_normalize(subjects,task,atlas='power'):
 			np.fill_diagonal(f,0.0)
 			f[np.isnan(f)] = 0.0
 			f = np.arctanh(f)
-			if np.isfinite(f).all() == False:
+			s_matrix.append(f.copy())
+		s_matrix = np.nanmean(s_matrix,axis=0)
+		assert s_matrix.shape == (264,264)
+		for cost in np.array(range(5,16))*0.01:
+			temp_matrix = s_matrix.copy()
+			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
+			assert np.diff([cost,graph.density()])[0] < .005
+
+def check_scrubbed_normalize(subjects,task,atlas='power'):	
+	for subject in subjects:
+		print subject
+		s_matrix = []
+		files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task))
+		for f in files:
+			dis_file = run_fd(subject,'_'.join(f.split('/')[-1].split('_')[2:5]))
+			remove_array = np.zeros(len(dis_file))
+			for i,fdf in enumerate(dis_file):
+				if fdf > .2:
+					remove_array[i] = 1
+					if i == 0:
+						remove_array[i+1] = 1
+						continue
+					if i == len(dis_file)-1:
+						remove_array[i-1] = 1
+						continue
+					remove_array[i-1] = 1
+					remove_array[i+1] = 1
+			if len(remove_array[remove_array==1])/float(len(remove_array)) > .75:
 				continue
+			f = np.load(f)
+			np.fill_diagonal(f,0.0)
+			f[np.isnan(f)] = 0.0
+			f = np.arctanh(f)
 			s_matrix.append(f.copy())
 		s_matrix = np.nanmean(s_matrix,axis=0)
 		assert s_matrix.shape == (264,264)
@@ -459,8 +490,6 @@ def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False):
 				f = np.load(f)
 				np.fill_diagonal(f,0.0)
 				f[np.isnan(f)] = 0.0
-				if np.isfinite(f).all() == False:
-					continue
 				f = np.arctanh(f)
 				s_matrix.append(f.copy())
 			if len(s_matrix) == 0:
@@ -641,24 +670,19 @@ def motion_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLING','RE
 		subject_wmds = static_results['subject_wmds']
 		subject_communities = static_results['subject_communities']
 		matrices = static_results['matrices']
-		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
 		subjects = static_results['subjects']
 		subject_motion = []
 		for subject in subjects:
 			subject_motion.append(get_sub_motion(subject,task))
 		assert (np.isnan(subject_motion)==True).any() == False
 		assert np.min(subject_motion) > 0.
-		# print np.min(subject_motion)
 		if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
+			# some subjects don't have performance measures...
 			task_perf = task_performance(subjects,task)
 			to_delete = np.isnan(task_perf).copy()
-			# to_delete[np.argwhere(np.isnan(subject_motion)==True).reshape(-1)] = True
 			to_delete = np.where(to_delete==True)
 			task_perf = np.delete(task_perf,to_delete)
 			task_perf = scipy.stats.zscore(task_perf)
-		# else:
-		# 	to_delete = np.isnan(subject_motion).copy()
-		# 	to_delete = np.where(to_delete==True)
 			subject_pcs = np.delete(subject_pcs,to_delete,axis=0)
 			subject_communities = np.delete(subject_communities,to_delete)
 			matrices = np.delete(matrices,to_delete,axis=0)
@@ -667,6 +691,7 @@ def motion_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLING','RE
 			subject_pcs[np.isnan(subject_pcs)] = 0.0
 			subject_wmds[np.isnan(subject_wmds)] = 0.0
 			subject_motion = np.delete(subject_motion,to_delete)
+		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
 		mod_pc_corr = np.zeros(subject_pcs.shape[1])
 		cmod_pc_corr = np.zeros(subject_pcs.shape[1])
 		cmod_perf_corr = np.zeros(subject_pcs.shape[1])
@@ -689,33 +714,37 @@ def motion_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLING','RE
 			if control_com == True and control_motion == True:
 				model_vars = np.array([subject_motion,subject_communities]).transpose()
 				r_perf = sm.GLM(task_perf,sm.add_constant(model_vars)).fit()
+				assert np.isclose(0.0,pearsonr(r_perf.resid_response,subject_motion)[0]) == True
+				assert np.isclose(0.0,pearsonr(r_perf.resid_response,subject_communities)[0]) == True
 			if control_com == True and control_motion == False:
 				r_perf = sm.GLM(task_perf,sm.add_constant(subject_communities)).fit()
+				assert np.isclose(0.0,pearsonr(r_perf.resid_response,subject_communities)[0]) == True
 			if control_com == False and control_motion == True:
 				r_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit()
+				assert np.isclose(0.0,pearsonr(r_perf.resid_response,subject_motion)[0]) == True
 		for i in range(subject_pcs.shape[1]):
-			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+			mod_pc_corr[i] = nan_pearsonr(subject_pcs[:,i],subject_mods)[0]
 			if control_com == True or control_motion == True:
 				cmod_pc_corr[i] = nan_pearsonr(subject_pcs[:,i],r_mod.resid_response)[0]
 			if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
 				mod_perf_corr[i] = nan_pearsonr(task_perf,subject_pcs[:,i])[0]
 				if control_com == True or control_motion == True:
-					cmod_perf_corr[i] = nan_pearsonr(subject_pcs[:,i],r_perf.resid_response)[0]
+					cmod_perf_corr[i] = nan_pearsonr(r_perf.resid_response,subject_pcs[:,i])[0]
 		mod_pc_corr_result = pearsonr(mod_pc_corr,mean_pc)
-		control_mod_pc_corr_result = pearsonr(cmod_pc_corr,mean_pc)
 		print 'r, Mean PC, r(PC,Q): ', np.round(mod_pc_corr_result[0],3), np.round(mod_pc_corr_result[1],10)
-		results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Q)','Statistic':'R, P', 'Result':(np.round(mod_pc_corr_result[0],3), np.round(mod_pc_corr_result[1],10))},ignore_index=True)
+		results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Q)','Statistic':'R, P', 'Result':'%s, %s' %(np.round(mod_pc_corr_result[0],3),np.round(mod_pc_corr_result[1],10))},ignore_index=True)
 		if control_com == True or control_motion == True:
+			control_mod_pc_corr_result = pearsonr(cmod_pc_corr,mean_pc)
 			print '%s Controlled r: ' %(c_str), np.round(control_mod_pc_corr_result[0],3), np.round(control_mod_pc_corr_result[1],10)
-			results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Q), %s Controlled r: ' %(c_str),'Statistic':'R, P', 'Result':(np.round(control_mod_pc_corr_result[0],3), np.round(control_mod_pc_corr_result[1],10))},ignore_index=True)
+			results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Q), %s Controlled r: ' %(c_str),'Statistic':'R, P', 'Result':'%s, %s' %(str(np.round(control_mod_pc_corr_result[0],3)), str(np.round(control_mod_pc_corr_result[1],10)))},ignore_index=True)
 		if task in ['WM','RELATIONAL','LANGUAGE','SOCIAL']:
 			result = nan_pearsonr(mod_perf_corr,mean_pc)
 			cresult = nan_pearsonr(cmod_perf_corr,mean_pc)
 			print 'r, Mean PC, r(PC,Performance): ', np.round(result[0],3), np.round(result[1],10)
-			results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Performance): ','Statistic':'R, P', 'Result':(np.round(result[0],3), np.round(result[1],10))},ignore_index=True)
+			results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Performance): ','Statistic':'R, P', 'Result':'%s, %s' %(str(np.round(result[0],3)), str(np.round(result[1],10)))},ignore_index=True)
 			if control_com == True or control_motion == True:
 				print '%s Controlled r: ' %(c_str), np.round(cresult[0],3), np.round(cresult[1],10)
-				results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Performance), %s Controlled r:  '%(c_str),'Statistic':'R, P', 'Result':(np.round(cresult[0],3), np.round(cresult[1],10))},ignore_index=True)
+				results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Performance), %s Controlled r:  '%(c_str),'Statistic':'R, P', 'Result':'%s, %s' %(str(np.round(cresult[0],3)), str(np.round(cresult[1],10)))},ignore_index=True)
 	return results_df
 
 def connectivity_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']):
@@ -2110,7 +2139,6 @@ def pc_classifier(t):
 
 def predict(v):
 	pvals = v[0]
-	# train = v[1] 
 	t = v[1]
 	task_perf = v[2] 
 	train = np.ones(len(pvals)).astype(bool)
@@ -2118,6 +2146,16 @@ def predict(v):
 	clf = linear_model.LinearRegression(fit_intercept=True)
 	clf.fit(pvals[train],task_perf[train])
 	return clf.predict(pvals[t])
+
+def sm_predict(v):
+	pvals = v[0]
+	t = v[1]
+	task_perf = v[2] 
+	train = np.ones(len(pvals)).astype(bool)
+	train[t] = False
+	pvals = sm.add_constant(pvals)
+	r_perf = sm.GLM(task_perf[train],pvals[train]).fit()
+	return r_perf.predict(pvals[t])
 
 def corrfunc(x, y, **kws):
 	r, _ = pearsonr(x, y)
@@ -2161,8 +2199,12 @@ def test_subs(task,atlas='power'):
 	print 'test_subs', (tnsubjects == tsubjects).all()
 
 def supplemental():
+	# results_df = pd.DataFrame(columns=['Task','Analysis','Statistic', 'Result'])
+	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz',control_com=False,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/performance_orig.csv')
 	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='scrub_.2',control_com=False,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/performance_scrubbed.csv')
 	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz',control_com=False,control_motion=True).to_csv('/home/despoB/mb3152/dynamic_mod/results/performance_motion_controlled.csv')
+	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz',control_com=True,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/performance_community_controlled.csv')
+	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=False,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/correlations_original.csv')
 	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=False,control_motion=True).to_csv('/home/despoB/mb3152/dynamic_mod/results/correlations_motion_controlled.csv')
 	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=True,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/correlations_community_controlled.csv')
 	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='scrub_.2',control_com=False,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/correlations_scrubbed.csv')
@@ -2214,28 +2256,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			task_perf[task_perf==1] = np.nan
 			# task_perf[task_perf==0.91666666666675001] = np.nan
 		assert subject_pcs.shape[0] == len(subjects)
-		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
-		df_array = []
 
-		if control_com == True and control_motion == True:
-			model_vars = np.array([subject_motion,subject_communities]).transpose()
-			subject_mods = sm.GLM(subject_mods,sm.add_constant(model_vars)).fit().resid_response
-		if control_com == True and control_motion == False:
-			subject_mods = sm.GLM(subject_mods,sm.add_constant(subject_communities)).fit().resid_response
-		if control_com == False and control_motion == True:
-			subject_mods = sm.GLM(subject_mods,sm.add_constant(subject_motion)).fit().resid_response
-		mod_pc_corr = np.zeros(subject_pcs.shape[1])
-		for i in range(subject_pcs.shape[1]):
-			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
-		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
-		for i in range(subject_wmds.shape[1]):
-			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
-		
-		predict_nodes = np.where(mod_pc_corr>0.0)[0]
-		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
-		wmd_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
-		wmd_local_predict_nodes = np.where(mod_wmd_corr>0.0)[0]
-		
 		"""
 		predict performance using high and low PCS values. 
 		"""
@@ -2255,14 +2276,43 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
 		rest_subject_pcs[np.isnan(rest_subject_pcs)] = 0.0
 		subject_wmds[np.isnan(subject_wmds)] = 0.0
+		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
+
+		if control_com == True and control_motion == True:
+			model_vars = np.array([subject_motion,subject_communities]).transpose()
+			subject_mods = sm.GLM(subject_mods,sm.add_constant(model_vars)).fit().resid_response
+			assert np.isclose(0.0,pearsonr(subject_mods,subject_motion)[0]) == True
+			assert np.isclose(0.0,pearsonr(subject_mods,subject_communities)[0]) == True
+		if control_com == True and control_motion == False:
+			subject_mods = sm.GLM(subject_mods,sm.add_constant(subject_communities)).fit().resid_response
+			assert np.isclose(0.0,pearsonr(subject_mods,subject_communities)[0]) == True
+		if control_com == False and control_motion == True:
+			subject_mods = sm.GLM(subject_mods,sm.add_constant(subject_motion)).fit().resid_response
+			assert np.isclose(0.0,pearsonr(subject_mods,subject_motion)[0]) == True
+
+		mod_pc_corr = np.zeros(subject_pcs.shape[1])
+		for i in range(subject_pcs.shape[1]):
+			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
+		for i in range(subject_wmds.shape[1]):
+			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
+
+		predict_nodes = np.where(mod_pc_corr>0.0)[0]
+		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
+		wmd_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
+		wmd_local_predict_nodes = np.where(mod_wmd_corr>0.0)[0]
 
 		if control_com == True and control_motion == True:
 			model_vars = np.array([subject_motion,subject_communities]).transpose()
 			task_perf = sm.GLM(task_perf,sm.add_constant(model_vars)).fit().resid_response
+			assert np.isclose(0.0,pearsonr(task_perf,subject_motion)[0]) == True
+			assert np.isclose(0.0,pearsonr(task_perf,subject_communities)[0]) == True
 		if control_com == True and control_motion == False:
 			task_perf = sm.GLM(task_perf,sm.add_constant(subject_communities)).fit().resid_response
+			assert np.isclose(0.0,pearsonr(task_perf,subject_communities)[0]) == True
 		if control_com == False and control_motion == True:
 			task_perf = sm.GLM(task_perf,sm.add_constant(subject_motion)).fit().resid_response
+			assert np.isclose(0.0,pearsonr(task_perf,subject_motion)[0]) == True
 
 		"""
 		prediction / cross validation
@@ -2302,11 +2352,11 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			# train[t] = False
 			# vs.append([pvals,train,t,task_perf])
 			vs.append([pvals.copy(),t,task_perf])
-		pool = Pool(20)
-		mean_nodal_prediction = pool.map(predict,vs)
+		pool = Pool(5)
+		mean_nodal_prediction = pool.map(sm_predict,vs)
 		result = pearsonr(np.array(mean_nodal_prediction).reshape(-1),task_perf)
 		print 'Mean Nodal Prediction of Performance, LOO: ', result
-		results_df = results_df.append({'Analysis':'Mean Nodal Prediction of Performance, LOO,','Task':task,'Statistic':'R, P','Result': (np.round(result[0],3),np.round(result[1],10))},ignore_index=True)
+		results_df = results_df.append({'Analysis':'Mean Nodal Prediction of Performance, LOO,','Task':task,'Statistic':'R, P','Result': '%s, %s'%(np.round(result[0],3),np.round(result[1],10))},ignore_index=True)
 		continue
 
 		pvals = np.concatenate([subject_pcs,subject_wmds],axis=1)
@@ -2870,7 +2920,7 @@ SGE Inputs
 # 			temp_matrix = s_matrix.copy()
 # 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
 # 			assert np.diff([cost,graph.density()])[0] < .005
-
+supplemental()
 if len(sys.argv) > 1:
 	if sys.argv[1] == 'perf':
 		performance_across_tasks()
@@ -2905,8 +2955,9 @@ if len(sys.argv) > 1:
 	if sys.argv[1] == 'check_norm':
 		atlas = sys.argv[3]
 		task = sys.argv[2]
-		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',sys.argv[2],sys.argv[3]))
-		check_normalize(subjects,task,atlas='power')
+		# subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',sys.argv[2],sys.argv[3]))
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_scrub_.2.npy' %('hcp',sys.argv[2],sys.argv[3]))
+		check_scrubbed_normalize(subjects,task,atlas='power')
 		print 'done checkin, all good!'
 
 """
