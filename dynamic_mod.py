@@ -697,6 +697,9 @@ def motion_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLING','RE
 			mod_pc_corr[i] = nan_pearsonr(subject_pcs[:,i],subject_mods)[0]
 			if control_com == True or control_motion == True:
 				cmod_pc_corr[i] = nan_pearsonr(subject_pcs[:,i],r_mod.resid_response)[0]
+		print np.nanmax(mod_pc_corr),np.nanmean(mod_pc_corr)
+		if control_com == True or control_motion == True:
+			print np.nanmax(cmod_pc_corr),np.nanmean(cmod_pc_corr)
 		mod_pc_corr_result = pearsonr(mod_pc_corr,mean_pc)
 		print 'r, Mean PC, r(PC,Q): ', np.round(mod_pc_corr_result[0],3), np.round(mod_pc_corr_result[1],10)
 		results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Q)','Statistic':'R, P', 'Result':'%s, %s' %(np.round(mod_pc_corr_result[0],3),np.round(mod_pc_corr_result[1],10))},ignore_index=True)
@@ -736,6 +739,9 @@ def motion_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLING','RE
 				mod_perf_corr[i] = nan_pearsonr(task_perf,subject_pcs[:,i])[0]
 				if control_com == True or control_motion == True:
 					cmod_perf_corr[i] = nan_pearsonr(r_perf.resid_response,subject_pcs[:,i])[0]
+			print np.nanmax(mod_perf_corr),np.nanmean(mod_perf_corr)
+			if control_com == True or control_motion == True:
+				print np.nanmax(cmod_perf_corr),np.nanmean(cmod_perf_corr)
 			result = nan_pearsonr(mod_perf_corr,mean_pc)
 			cresult = nan_pearsonr(cmod_perf_corr,mean_pc)
 			print 'r, Mean PC, r(PC,Performance): ', np.round(result[0],3), np.round(result[1],10)
@@ -2214,6 +2220,16 @@ def supplemental():
 	print 'correlations community control'
 	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=True,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/correlations_community_controlled.csv')
 
+def print_supplemental():
+	print 'correlations original'
+	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=False,control_motion=False)
+	print 'correlations scrubbed'
+	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='scrub_.2',control_com=False,control_motion=False)	
+	print 'correlations motion control'
+	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=False,control_motion=True)
+	print 'correlations community control'
+	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=True,control_motion=False)
+
 def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz_wc',control_com=False,control_motion=False):
 	import warnings
 	warnings.filterwarnings('ignore')
@@ -2923,8 +2939,7 @@ SGE Inputs
 # 			temp_matrix = s_matrix.copy()
 # 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
 # 			assert np.diff([cost,graph.density()])[0] < .005
-# supplemental()
-supplemental()
+# print_supplemental()
 if len(sys.argv) > 1:
 	if sys.argv[1] == 'perf':
 		performance_across_tasks()
