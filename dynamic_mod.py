@@ -2277,20 +2277,20 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 			subject_motion.append(get_sub_motion(subject,task))
 		assert np.min(subject_motion) > 0.0
 		rest_idx = []
-		task_idx = []
 		for i,s in enumerate(rest_subjects):
 			if s in subjects:
 				rest_idx.append(i)
+		# task_idx = []
 		# for i,s in enumerate(subjects):
 		# 	if s in rest_subjects:
 		# 		task_idx.append(i)
 		# assert (rest_subjects[rest_idx] == subjects[task_idx]).all()
 		# going to need somtehing fancy, since you want all task subjects for some analyses, but some missing rest because of scrubbing, so need to do something for those analyses.
+		# might need a special delete below for doing rest to tasks analyses for scrubbing.
 		if run_version != 'scrub_.2':
 			for i,s in enumerate(subjects):
 				assert s in rest_subjects
 			assert (rest_subjects[rest_idx] == subjects).all()
-			#going to have to do some type of np.intersect1d for scrubbed, since some subjects have task and no rest...
 		task_perf = task_performance(subjects,task)
 		if task == 'SOCIAL':
 			task_perf[task_perf==1] = np.nan
@@ -2311,7 +2311,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		rest_subject_pcs = np.delete(rest_subject_pcs[rest_idx],to_delete,axis=0)
 		rest_subject_wmds = np.delete(rest_subject_wmds[rest_idx],to_delete,axis=0)
 		rest_subject_mods = np.delete(rest_subject_mods[rest_idx],to_delete,axis=0)
-		matrices = np.delete(matrices[task_idx],to_delete,axis=0)
+		matrices = np.delete(matrices,to_delete,axis=0)
 		subject_mods = np.delete(subject_mods,to_delete)
 		subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
 		task_perf = np.delete(task_perf,to_delete)
