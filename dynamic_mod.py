@@ -2205,7 +2205,6 @@ def supplemental():
 	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz',control_com=False,control_motion=True).to_csv('/home/despoB/mb3152/dynamic_mod/results/performance_motion_controlled.csv')
 	print 'performance community control'
 	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz',control_com=True,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/performance_community_controlled.csv')
-	1/0
 	print 'correlations original'
 	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=False,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/correlations_original.csv')
 	print 'correlations scrubbed'
@@ -2925,7 +2924,7 @@ SGE Inputs
 # 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
 # 			assert np.diff([cost,graph.density()])[0] < .005
 # supplemental()
-# supplemental()
+supplemental()
 if len(sys.argv) > 1:
 	if sys.argv[1] == 'perf':
 		performance_across_tasks()
