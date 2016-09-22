@@ -742,8 +742,8 @@ def motion_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLING','RE
 			print np.nanmax(mod_perf_corr),np.nanmean(mod_perf_corr)
 			if control_com == True or control_motion == True:
 				print np.nanmax(cmod_perf_corr),np.nanmean(cmod_perf_corr)
-			result = nan_pearsonr(mod_perf_corr,mean_pc)
-			cresult = nan_pearsonr(cmod_perf_corr,mean_pc)
+			result = pearsonr(mod_perf_corr,mean_pc)
+			cresult = pearsonr(cmod_perf_corr,mean_pc)
 			print 'r, Mean PC, r(PC,Performance): ', np.round(result[0],3), np.round(result[1],10)
 			results_df = results_df.append({'Task':task,'Analysis': 'r, Mean PC, r(PC,Performance): ','Statistic':'R, P', 'Result':'%s, %s' %(str(np.round(result[0],3)), str(np.round(result[1],10)))},ignore_index=True)
 			if control_com == True or control_motion == True:
@@ -2221,6 +2221,14 @@ def supplemental():
 	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=True,control_motion=False).to_csv('/home/despoB/mb3152/dynamic_mod/results/correlations_community_controlled.csv')
 
 def print_supplemental():
+	print 'performance original'
+	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz',control_com=False,control_motion=False)
+	print 'performance scrubbed'
+	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='scrub_.2',control_com=False,control_motion=False)
+	print 'performance motion control'
+	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz',control_com=False,control_motion=True)
+	print 'performance community control'
+	performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','SOCIAL'],run_version='fz',control_com=True,control_motion=False)
 	print 'correlations original'
 	motion_across_tasks(atlas='power',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz',control_com=False,control_motion=False)
 	print 'correlations scrubbed'
@@ -2259,23 +2267,33 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/hcp_%s_%s_subs_%s.npy'%(task,atlas,run_version))
 		static_results = graph_metrics(subjects,task,atlas,run_version=run_version)
 		subject_pcs = static_results['subject_pcs'].copy()
+		subject_wmds = static_results['subject_wmds']
 		matrices = static_results['matrices']
 		subject_mods = static_results['subject_mods']
 		subject_communities = static_results['subject_communities']
 		subjects = static_results['subjects']
 		subject_motion = []
 		for subject in subjects:
-			subject_motion.append(get_sub_motion(subject,task))	
-		subject_wmds = static_results['subject_wmds']
+			subject_motion.append(get_sub_motion(subject,task))
+		assert np.min(subject_motion) > 0.0
 		rest_idx = []
+		task_idx = []
 		for i,s in enumerate(rest_subjects):
-			if s not in subjects:
-				continue
-			rest_idx.append(i)
+			if s in subjects:
+				rest_idx.append(i)
+		# for i,s in enumerate(subjects):
+		# 	if s in rest_subjects:
+		# 		task_idx.append(i)
+		# assert (rest_subjects[rest_idx] == subjects[task_idx]).all()
+		# going to need somtehing fancy, since you want all task subjects for some analyses, but some missing rest because of scrubbing, so need to do something for those analyses.
+		if run_version != 'scrub_.2':
+			for i,s in enumerate(subjects):
+				assert s in rest_subjects
+			assert (rest_subjects[rest_idx] == subjects).all()
+			#going to have to do some type of np.intersect1d for scrubbed, since some subjects have task and no rest...
 		task_perf = task_performance(subjects,task)
 		if task == 'SOCIAL':
 			task_perf[task_perf==1] = np.nan
-			# task_perf[task_perf==0.91666666666675001] = np.nan
 		assert subject_pcs.shape[0] == len(subjects)
 		mod_pc_corr = np.zeros(subject_pcs.shape[1])
 		for i in range(subject_pcs.shape[1]):
@@ -2293,11 +2311,11 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		rest_subject_pcs = np.delete(rest_subject_pcs[rest_idx],to_delete,axis=0)
 		rest_subject_wmds = np.delete(rest_subject_wmds[rest_idx],to_delete,axis=0)
 		rest_subject_mods = np.delete(rest_subject_mods[rest_idx],to_delete,axis=0)
-		matrices = np.delete(matrices,to_delete,axis=0)
+		matrices = np.delete(matrices[task_idx],to_delete,axis=0)
 		subject_mods = np.delete(subject_mods,to_delete)
 		subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
 		task_perf = np.delete(task_perf,to_delete)
-		subject_motion = np.delete(subject_motion,to_delete)
+		subject_motion = np.delete(np.array(subject_motion),to_delete)
 		subject_communities = np.delete(subject_communities,to_delete)
 		task_perf = scipy.stats.zscore(task_perf)
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
@@ -2367,9 +2385,6 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		pvals = scipy.stats.zscore(pvals,axis=0)
 		vs = []
 		for t in range(pvals.shape[0]):
-			# train = np.ones(len(pvals)).astype(bool)
-			# train[t] = False
-			# vs.append([pvals,train,t,task_perf])
 			vs.append([pvals.copy(),t,task_perf])
 		pool = Pool(5)
 		mean_nodal_prediction = pool.map(sm_predict,vs)
