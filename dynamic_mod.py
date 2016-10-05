@@ -23,6 +23,11 @@ import math
 from collections import Counter
 import matplotlib.pylab as plt
 plt.rcParams['pdf.fonttype'] = 42
+plt.rc('font', family='sans-serif') 
+plt.rc('font', serif='Helvetica') 
+plt.rc('text', usetex='false') 
+# matplotlib.rcParams.update({'font.size': 22})
+# plt.rcParams['font.family'] = 'Helvetica'
 import seaborn as sns
 import powerlaw
 from richclub import preserve_strength, RC
@@ -234,7 +239,7 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 		for j in range(len(swap_dict)):
 			corr_mat[swap_dict[i],swap_dict[j]] = matrix[i,j]
 			corr_mat[swap_dict[j],swap_dict[i]] = matrix[j,i]
-	sns.set(context="paper", font="monospace")
+	sns.set(context="paper", font="Helvetica",font_scale=1.2)
 	# Set up the matplotlib figure
 	f, ax = plt.subplots(figsize=(12, 9))
 	# Draw the heatmap using seaborn
@@ -247,18 +252,18 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 	std = np.nanstd(corr_mat)
 	mean = np.nanmean(corr_mat)
 	# sns.heatmap(corr_mat,square=True,yticklabels=y_names,xticklabels=x_names,vmin=-3,vmax=3,linewidths=0.0,cmap="RdBu_r")
-	vmin = mean - (std*3)
-	vmax = mean + (std*3)
-	sns.heatmap(corr_mat,square=True,vmin=vmin,vmax=vmax,yticklabels=y_names,xticklabels=x_names,linewidths=0.0,cmap="RdBu_r")
+	vmin = mean - (std*2)
+	vmax = mean + (std*2)
+	sns.heatmap(corr_mat,square=True,vmin=vmin,vmax=vmax,yticklabels=y_names,xticklabels=x_names,cmap=sns.diverging_palette(255,0,s=99,sep=80, n=15,center='dark',as_cmap=True),rasterized=True)
 	membership.sort()
 	# Use matplotlib directly to emphasize known networks
 	for i, network in enumerate(membership):
 		if network != membership[i - 1]:
-			ax.axhline(len(membership) - i, c='black',linewidth=2)
-			ax.axvline(i, c='black',linewidth=2)
+			ax.axhline(len(membership) - i, c='white',linewidth=.75)
+			ax.axvline(i, c='white',linewidth=.75)
 	f.tight_layout()
 	if out_file != None:
-		plt.savefig(out_file,dpi=1200)
+		plt.savefig(out_file)
 		plt.close()
 	if plot_corr == True:
 		plt.show()
@@ -269,11 +274,12 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 def make_static_matrix(subject,task,project,atlas,scrub=False):
 	hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
 	parcel_path = '/home/despoB/mb3152/dynamic_mod/atlases/%s_template.nii' %(atlas)
-	try:
-		MP = np.load('/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task))
-	except:
-		run_fd(subject,task)
-		MP = np.load('/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task))
+	MP = None
+	# try:
+	# 	MP = np.load('/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task))
+	# except:
+	# 	run_fd(subject,task)
+	# 	MP = np.load('/home/despoB/mb3152/dynamic_mod/motion_files/%s_%s.npy' %(subject,task))
 	subject_path = hcp_subject_dir.replace('SUBJECT',subject).replace('TASK',task)
 	if scrub == True:
 		subject_time_series = brain_graphs.load_subject_time_series(subject_path,dis_file=MP,scrub_mm=0.2)
@@ -559,6 +565,48 @@ def pc_edge_correlation(subject_pcs,matrices,path):
 				pc_edge_corr[i,n2,n1] = val
 		np.save(path,pc_edge_corr)
 	return pc_edge_corr
+
+def pc_edge_q_figure(task):
+	driver = 'PC'
+	project='hcp'
+	atlas = 'power'
+	run_version = 'fz'
+	task = 'REST'
+	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
+	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version))
+	static_results = graph_metrics(subjects,task,atlas,run_version)
+	subject_pcs = static_results['subject_pcs']
+	subject_mods = static_results['subject_mods']
+	subject_wmds = static_results['subject_wmds']
+	matrices = static_results['matrices']
+	task_perf = task_performance(subjects,task)
+	assert subject_pcs.shape[0] == len(subjects)
+	mean_pc = np.nanmean(subject_pcs,axis=0)
+	mean_wmd = np.nanmean(subject_wmds,axis=0)
+	mod_pc_corr = np.zeros(subject_pcs.shape[1])
+	for i in range(subject_pcs.shape[1]):
+		mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+	mod_wmd_corr = np.zeros(subject_wmds.shape[1])
+	for i in range(subject_wmds.shape[1]):
+		mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
+	if driver == 'PC':
+		predict_nodes = np.where(mod_pc_corr>0.0)[0]
+		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
+		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
+	if driver == 'WMD':
+		predict_nodes = np.where(mod_wmd_corr>0.0)[0]
+		local_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
+		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_wmds,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(project,task,atlas)))
+	plot_corr_matrix(np.nanmean(pc_edge_corr[predict_nodes,:,:],axis=0),network_names.copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(task,run_version),block_lower=False,return_array=True,plot_corr=True,label=False)
+
+	n_nodes = pc_edge_corr.shape[0]
+	q_edge_corr = np.zeros((n_nodes,n_nodes))
+	for i,j in combinations(range(n_nodes),2):
+		ijqcorr = nan_pearsonr(matrices[:,i,j],subject_mods)[0]
+		q_edge_corr[i,j] = ijqcorr
+		q_edge_corr[j,i] = ijqcorr
+	# plot_corr_matrix(q_edge_corr,network_names.copy(),out_file=None,block_lower=False,return_array=True,plot_corr=True,label=False)
+	plot_corr_matrix(q_edge_corr,network_names.copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_edgecorr_matrix.pdf'%(task,driver,run_version),block_lower=False,return_array=True,plot_corr=True,label=False)
 
 def network_labels(atlas):
 	if atlas == 'gordon':
@@ -899,7 +947,6 @@ def matrix_of_changes():
 	tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']
 	project='hcp'
 	atlas = 'power'
-	tasks = ['WM']
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
 	for driver in drivers:
 		all_matrices = []
@@ -1148,7 +1195,8 @@ def mediation(task):
 	mean_conn = np.nanmean(matrices,axis=0)
 	e_tresh = np.percentile(mean_conn,90)
 	try:
-		m = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task))
+		# m = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task))
+		m = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_0.npy')
 	except:
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
 		m = np.zeros((264,264,264))
@@ -1168,11 +1216,16 @@ def mediation(task):
 	for i in range(264):
 		real_t = scipy.stats.ttest_ind(np.abs(m[i][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1)),np.abs(m[i][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1)))[0]
 		if mod_pc_corr[i] > 0.0:
-			locality_df = locality_df.append({'Q+':True,'t_type':'real','t':real_t},ignore_index=True)
+			locality_df = locality_df.append({"Nodes' Correlation with Q":'+','t':real_t},ignore_index=True)
 		else:
-			locality_df = locality_df.append({'Q+':False,'t_type':'real','t':real_t},ignore_index=True)
+			locality_df = locality_df.append({"Nodes' Correlation with Q":'-','t':real_t},ignore_index=True)
 	locality_df.dropna(inplace=True)
-	print scipy.stats.ttest_ind(locality_df.t[locality_df['Q+']==True],locality_df.t[locality_df['Q+']==False])
+	stat = tstatfunc(locality_df.t[locality_df["Nodes' Correlation with Q"]=='+'],locality_df.t[locality_df["Nodes' Correlation with Q"]=='-'])
+	print stat
+	sns.set_style("white")
+	sns.set_style("ticks")
+	sns.violinplot(data=locality_df,y='t',x="Nodes' Correlation with Q",order = ['+','-'],inner='quartile',palette=np.array(sns.color_palette("cubehelix", 10))[[7,9]])
+	sns.plt.text(.5,50,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
 
 def sm_null():
 	try:
@@ -2906,7 +2959,7 @@ def airlines_RC(return_graph=False):
 """
 SGE Inputs
 """
-# mediation()
+mediation('REST')
 # atlas = 'power'
 # tasks = ['WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','MOTOR','REST']
 # for task in tasks:
