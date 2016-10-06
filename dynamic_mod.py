@@ -208,37 +208,57 @@ def behavioral_performance(subjects,tasks):
 				results[id_s,id_t] = np.nan
 	return results
 
-def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_array=True,plot_corr=True,label=False):
-	swap_dict = {}
-	index = 0
-	corr_mat = np.zeros((matrix.shape))
-	names = []
-	x_ticks = []
-	y_ticks = []
-	for i in np.unique(membership):
-		for node in np.where(membership==i)[0]:
-			swap_dict[node] = index
-			index = index + 1
-			names.append(membership[node])
-	y_names = []
-	x_names = []
-	old_name = 0
-	for i,name in enumerate(names):
-		if name == old_name:
-			y_names.append(' ')
-			x_names.append(' ')
+def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_array=True,plot_corr=True,label=False,reorder=True):
+	if reorder == True:
+		swap_dict = {}
+		index = 0
+		corr_mat = np.zeros((matrix.shape))
+		names = []
+		x_ticks = []
+		y_ticks = []
+		for i in np.unique(membership):
+			for node in np.where(membership==i)[0]:
+				swap_dict[node] = index
+				index = index + 1
+				names.append(membership[node])
+		y_names = []
+		x_names = []
+		old_name = 0
+		for i,name in enumerate(names):
+			if name == old_name:
+				y_names.append(' ')
+				x_names.append(' ')
+				y_ticks.append(i)
+				x_ticks.append(len(names)-i)
+				continue
+			old_name = name
 			y_ticks.append(i)
 			x_ticks.append(len(names)-i)
-			continue
-		old_name = name
-		y_ticks.append(i)
-		x_ticks.append(len(names)-i)
-		y_names.append(name)
-		x_names.append(name)
-	for i in range(len(swap_dict)):
-		for j in range(len(swap_dict)):
-			corr_mat[swap_dict[i],swap_dict[j]] = matrix[i,j]
-			corr_mat[swap_dict[j],swap_dict[i]] = matrix[j,i]
+			y_names.append(name)
+			x_names.append(name)
+		for i in range(len(swap_dict)):
+			for j in range(len(swap_dict)):
+				corr_mat[swap_dict[i],swap_dict[j]] = matrix[i,j]
+				corr_mat[swap_dict[j],swap_dict[i]] = matrix[j,i]
+	else:
+		corr_mat = matrix
+		x_ticks = []
+		y_ticks = []
+		y_names = []
+		x_names = []
+		old_name = 0
+		for i,name in enumerate(membership):
+			if name == old_name:
+				y_names.append(' ')
+				x_names.append(' ')
+				y_ticks.append(i)
+				x_ticks.append(len(membership)-i)
+				continue
+			old_name = name
+			y_ticks.append(i)
+			x_ticks.append(len(membership)-i)
+			y_names.append(name)
+			x_names.append(name)
 	sns.set(context="paper", font="Helvetica",font_scale=1.2)
 	# Set up the matplotlib figure
 	f, ax = plt.subplots(figsize=(12, 9))
@@ -255,7 +275,8 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 	vmin = mean - (std*2)
 	vmax = mean + (std*2)
 	sns.heatmap(corr_mat,square=True,vmin=vmin,vmax=vmax,yticklabels=y_names,xticklabels=x_names,cmap=sns.diverging_palette(255,0,s=99,sep=80, n=15,center='dark',as_cmap=True),rasterized=True)
-	membership.sort()
+	if reorder == True:
+		membership.sort()
 	# Use matplotlib directly to emphasize known networks
 	for i, network in enumerate(membership):
 		if network != membership[i - 1]:
@@ -453,7 +474,7 @@ def check_scrubbed_normalize(subjects,task,atlas='power'):
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
 			assert np.diff([cost,graph.density()])[0] < .005
 
-def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False):
+def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False,scrubbed=False):
 	"""
 	run graph metrics or load them
 	"""
@@ -478,25 +499,28 @@ def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False):
 		thresh_matrices = []
 		for subject in subjects:
 			s_matrix = []
-			# files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task)) # FOR SCRUBBING ONLY
-			files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
+			if scrubbed == True:
+				files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task)) # FOR SCRUBBING ONLY
+			if scrubbed == False:
+				files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
 			for f in files:
-				# FOR SCRUBBING ONLY
-				# dis_file = run_fd(subject,'_'.join(f.split('/')[-1].split('_')[2:5]))
-				# remove_array = np.zeros(len(dis_file))
-				# for i,fdf in enumerate(dis_file):
-				# 	if fdf > .2:
-				# 		remove_array[i] = 1
-				# 		if i == 0:
-				# 			remove_array[i+1] = 1
-				# 			continue
-				# 		if i == len(dis_file)-1:
-				# 			remove_array[i-1] = 1
-				# 			continue
-				# 		remove_array[i-1] = 1
-				# 		remove_array[i+1] = 1
-				# if len(remove_array[remove_array==1])/float(len(remove_array)) > .75:
-				# 	continue
+				if scrubbed == True:
+					# FOR SCRUBBING ONLY
+					dis_file = run_fd(subject,'_'.join(f.split('/')[-1].split('_')[2:5]))
+					remove_array = np.zeros(len(dis_file))
+					for i,fdf in enumerate(dis_file):
+						if fdf > .2:
+							remove_array[i] = 1
+							if i == 0:
+								remove_array[i+1] = 1
+								continue
+							if i == len(dis_file)-1:
+								remove_array[i-1] = 1
+								continue
+							remove_array[i-1] = 1
+							remove_array[i+1] = 1
+					if len(remove_array[remove_array==1])/float(len(remove_array)) > .75:
+						continue
 				f = np.load(f)
 				np.fill_diagonal(f,0.0)
 				f[np.isnan(f)] = 0.0
@@ -519,7 +543,7 @@ def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False):
 		assert len(variables) == len(finished_subjects)
 		print 'Running Graph Theory Analyses'
 		from multiprocessing import Pool
-		pool = Pool(5)
+		pool = Pool(18)
 		results = pool.map(individual_graph_analyes_wc,variables)		
 		for r,s in zip(results,finished_subjects):
 			subject_mods.append(np.nanmean(r[0]))
@@ -571,7 +595,7 @@ def pc_edge_q_figure(task):
 	project='hcp'
 	atlas = 'power'
 	run_version = 'fz'
-	task = 'REST'
+	# task = 'WM'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
 	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version))
 	static_results = graph_metrics(subjects,task,atlas,run_version)
@@ -597,8 +621,16 @@ def pc_edge_q_figure(task):
 		predict_nodes = np.where(mod_wmd_corr>0.0)[0]
 		local_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
 		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_wmds,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(project,task,atlas)))
-	plot_corr_matrix(np.nanmean(pc_edge_corr[predict_nodes,:,:],axis=0),network_names.copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(task,run_version),block_lower=False,return_array=True,plot_corr=True,label=False)
+	#order by primary versus secondary networks. 
+	network_order = ['Auditory','Sensory/somatomotor Hand','Sensory/somatomotor Mouth','Visual','Dorsal attention','Ventral attention',
+	'Cingulo-opercular Task Control','Salience','Fronto-parietal Task Control','Default mode','Cerebellar','Subcortical','Memory retrieval?','Uncertain']
 
+	swap_indices = []
+	for nn in network_order:
+		original_idx = np.where(network_names == nn)
+		for i in range(len(original_idx[0])):
+			swap_indices.append(original_idx[0][i])
+	plot_corr_matrix(np.nanmean(pc_edge_corr[predict_nodes,:,:],axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(task,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
 	n_nodes = pc_edge_corr.shape[0]
 	q_edge_corr = np.zeros((n_nodes,n_nodes))
 	for i,j in combinations(range(n_nodes),2):
@@ -606,7 +638,7 @@ def pc_edge_q_figure(task):
 		q_edge_corr[i,j] = ijqcorr
 		q_edge_corr[j,i] = ijqcorr
 	# plot_corr_matrix(q_edge_corr,network_names.copy(),out_file=None,block_lower=False,return_array=True,plot_corr=True,label=False)
-	plot_corr_matrix(q_edge_corr,network_names.copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_edgecorr_matrix.pdf'%(task,driver,run_version),block_lower=False,return_array=True,plot_corr=True,label=False)
+	plot_corr_matrix(q_edge_corr[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_edgecorr_matrix.pdf'%(task,driver,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
 
 def network_labels(atlas):
 	if atlas == 'gordon':
@@ -723,11 +755,12 @@ def connectivity_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLIN
 		subject_communities = static_results['subject_communities']
 		matrices = static_results['matrices']
 		subjects = static_results['subjects']
-		subject_motion = []
-		for subject in subjects:
-			subject_motion.append(get_sub_motion(subject,task))
-		assert (np.isnan(subject_motion)==True).any() == False
-		assert np.min(subject_motion) > 0.
+		if control_motion == True:
+			subject_motion = []
+			for subject in subjects:
+				subject_motion.append(get_sub_motion(subject,task))
+			assert (np.isnan(subject_motion)==True).any() == False
+			assert np.min(subject_motion) > 0.
 		mean_pc = np.nanmean(static_results['subject_pcs'],axis=0)
 		mod_pc_corr = np.zeros(subject_pcs.shape[1])
 		cmod_pc_corr = np.zeros(subject_pcs.shape[1])
@@ -772,7 +805,8 @@ def connectivity_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLIN
 			subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
 			subject_pcs[np.isnan(subject_pcs)] = 0.0
 			subject_wmds[np.isnan(subject_wmds)] = 0.0
-			subject_motion = np.delete(subject_motion,to_delete)
+			if control_motion == True:
+				subject_motion = np.delete(subject_motion,to_delete)
 			mean_pc = np.nanmean(subject_pcs,axis=0)
 			cmod_perf_corr = np.zeros(subject_pcs.shape[1])
 			mod_perf_corr = np.zeros(subject_pcs.shape[1])
@@ -1193,10 +1227,9 @@ def mediation(task):
 	for i in range(subject_pcs.shape[1]):
 		mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
 	mean_conn = np.nanmean(matrices,axis=0)
-	e_tresh = np.percentile(mean_conn,90)
+	e_tresh = np.percentile(mean_conn,85)
 	try:
-		# m = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task))
-		m = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_0.npy')
+		m = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task))
 	except:
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
 		m = np.zeros((264,264,264))
@@ -1211,7 +1244,7 @@ def mediation(task):
 			for r,i in zip(results,combinations(range(264),2)):
 				m[n,i[0],i[1]] = r
 				m[n,i[1],i[0]] = r
-			np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task),result)
+			np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task),m)
 	locality_df = pd.DataFrame()
 	for i in range(264):
 		real_t = scipy.stats.ttest_ind(np.abs(m[i][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1)),np.abs(m[i][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1)))[0]
@@ -2304,10 +2337,11 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		subject_mods = static_results['subject_mods']
 		subject_communities = static_results['subject_communities']
 		subjects = static_results['subjects']
-		subject_motion = []
-		for subject in subjects:
-			subject_motion.append(get_sub_motion(subject,task))
-		assert np.min(subject_motion) > 0.0
+		if control_motion == True:
+			subject_motion = []
+			for subject in subjects:
+				subject_motion.append(get_sub_motion(subject,task))
+			assert np.min(subject_motion) > 0.0
 		rest_idx = []
 		for i,s in enumerate(rest_subjects):
 			if s in subjects:
@@ -2347,7 +2381,8 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		subject_mods = np.delete(subject_mods,to_delete)
 		subject_wmds = np.delete(subject_wmds,to_delete,axis=0)
 		task_perf = np.delete(task_perf,to_delete)
-		subject_motion = np.delete(np.array(subject_motion),to_delete)
+		if control_motion == True:
+			subject_motion = np.delete(np.array(subject_motion),to_delete)
 		subject_communities = np.delete(subject_communities,to_delete)
 		task_perf = scipy.stats.zscore(task_perf)
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
@@ -2959,7 +2994,7 @@ def airlines_RC(return_graph=False):
 """
 SGE Inputs
 """
-mediation('REST')
+
 # atlas = 'power'
 # tasks = ['WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','MOTOR','REST']
 # for task in tasks:
@@ -3007,8 +3042,15 @@ if len(sys.argv) > 1:
 		pc_edge_corr = pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/hcp_%s_power_pc_edge_corr_z.npy' %(task))
 	if sys.argv[1] == 'graph_metrics':
 		# subjects = remove_missing_subjects(list(np.array(hcp_subjects).copy()),sys.argv[2],sys.argv[3])
-		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',sys.argv[2],sys.argv[3]))
-		graph_metrics(subjects,task=sys.argv[2],atlas=sys.argv[3],run_version='fz_wc',run=True)
+		# subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',sys.argv[2],sys.argv[3]))
+		# graph_metrics(subjects,task=sys.argv[2],atlas=sys.argv[3],run_version='fz_wc',run=True)
+		subjects = []
+		dirs = os.listdir('/home/despoB/connectome-data/')
+		for s in dirs:
+			try: int(s)
+			except: continue
+			subjects.append(str(s))
+		graph_metrics(subjects,task=sys.argv[2],atlas=sys.argv[3],run_version='HCP_900',run=True)
 	if sys.argv[1] == 'make_matrix':
 		subject = str(sys.argv[2])
 		task = str(sys.argv[3])
@@ -3025,6 +3067,8 @@ if len(sys.argv) > 1:
 		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_scrub_.2.npy' %('hcp',sys.argv[2],sys.argv[3]))
 		check_scrubbed_normalize(subjects,task,atlas='power')
 		print 'done checkin, all good!'
+	if sys.argv[1] == 'mediation':
+		mediation(sys.argv[2]) 
 
 """
 Methods
