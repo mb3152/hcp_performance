@@ -314,17 +314,15 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 		legobj.set_linewidth(2.5)
 	if colorbar == False:
 		fig.cax.set_visible(False)
-	# plt.tight_layout()
 	if out_file != None:
 		plt.savefig(out_file)
-		# plt.close()
+		plt.close()
 	if plot_corr == True:
 		plt.show()
 	if return_array == True:
-		# plt.close()
+		plt.close()
 		return corr_mat
 	return fig
-
 
 def make_static_matrix(subject,task,project,atlas,scrub=False):
 	hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
@@ -624,7 +622,6 @@ def pc_edge_correlation(subject_pcs,matrices,path):
 		np.save(path,pc_edge_corr)
 	return pc_edge_corr
 
-
 def pc_edge_q_figure(tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']):
 	driver = 'PC'
 	project='hcp'
@@ -695,26 +692,38 @@ def pc_edge_q_figure(tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGU
 		for i in range(264):
 			real_t = scipy.stats.ttest_ind(np.abs(m[i][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1)),np.abs(m[i][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1)))[0]
 			if mod_pc_corr[i] > 0.0:
-				locality_df = locality_df.append({"Nodes' Correlation with Q":'Positive R Nodes','t':real_t,'Task':task},ignore_index=True)
+				locality_df = locality_df.append({"Nodes' Correlation with Q":'Positive R Nodes','t':real_t,'Task':task.capitalize()},ignore_index=True)
 			else:
-				locality_df = locality_df.append({"Nodes' Correlation with Q":'Negative R Nodes','t':real_t,'Task':task},ignore_index=True)
+				locality_df = locality_df.append({"Nodes' Correlation with Q":'Negative R Nodes','t':real_t,'Task':task.capitalize()},ignore_index=True)
 		locality_df.dropna(inplace=True)
-		stat = tstatfunc(locality_df.t[(locality_df["Nodes' Correlation with Q"]=='Positive R Nodes')&(locality_df["Task"]==task)],locality_df.t[(locality_df["Nodes' Correlation with Q"]=='Negative R Nodes')&(locality_df["Task"]==task)])
-		plot_corr_matrix(np.nanmean(q_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names.copy()[swap_indices],out_file='%s/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(homedir,tasks,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+		stat = tstatfunc(locality_df.t[(locality_df["Nodes' Correlation with Q"]=='Positive R Nodes')&(locality_df["Task"]==task.capitalize())],locality_df.t[(locality_df["Nodes' Correlation with Q"]=='Negative R Nodes')&(locality_df["Task"]==task.capitalize())])
+		# plot_corr_matrix(np.nanmean(q_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names.copy()[swap_indices],out_file='%s/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(homedir,tasks,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
 		1/0
+		print np.nanmin(pc_corr_matrix),np.nanmax(pc_corr_matrix)
+		print np.nanmin(q_corr_matrix),np.nanmax(q_corr_matrix)
+		print np.nanmin(np.nanmean(m[predict_nodes,:,:],axis=0)),np.nanmax(np.nanmean(m[predict_nodes,:,:],axis=0))
 		if task in ['WM','RELATIONAL','SOCIAL','LANGUAGE']:
 			print nan_pearsonr(perf_edge_corr.reshape(-1),np.nanmean(pc_edge_corr[predict_nodes,:,:],axis=0).reshape(-1))
-			plot_corr_matrix(perf_edge_corr[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_edge_perf_corr_matrix.pdf'%(homedir,tasks,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
-		plot_corr_matrix(np.nanmean(m[predict_nodes,:,:],axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_%s_mediation_matrix.pdf'%(homedir,tasks,driver,run_version),block_lower=False,return_array=True,plot_corr=False,label=False,reorder=False)
-		plot_corr_matrix(np.nanmean(pc_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(homedir,tasks,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
-		plot_corr_matrix(np.nanmean(q_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_%s_edgecorr_matrix.pdf'%(homedir,tasks,driver,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
-
+			plot_corr_matrix(perf_edge_corr[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_edge_perf_corr_matrix.pdf'%(homedir,task,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+		plot_corr_matrix(np.nanmean(m[predict_nodes,:,:],axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_%s_mediation_matrix.pdf'%(homedir,task,driver,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+		plot_corr_matrix(np.nanmean(pc_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(homedir,task,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+		plot_corr_matrix(np.nanmean(q_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_%s_edgecorr_matrix.pdf'%(homedir,task,driver,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+		
+		# plot_corr_matrix(np.nanmean(m[predict_nodes,:,:],axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file=None,block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+	plot_corr_matrix(np.nanmean(q_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_mean_q_corr_matrix.pdf'%(homedir,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+	plot_corr_matrix(np.nanmean(pc_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_mean_pc_corr_matrix.pdf'%(homedir,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+	
+	# plot_corr_matrix(np.nanmean(m[predict_nodes,:,:],axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_%s_mediation_matrix_withbar.pdf'%(homedir,task,driver,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,colorbar=True,draw_legend=True)	
+	f = sns.plt.figure(figsize=(18,6))
 	sns.set_style("white")
 	sns.set_style("ticks")
 	sns.set(context="paper",font='Helvetica',font_scale=1.2)
 	sns.violinplot(data=locality_df[locality_df["Nodes' Correlation with Q"]=='Positive R Nodes'],y='t',x='Task',hue='Task',inner='quartile',palette=sns.palettes.color_palette('Paired',7))
 	# sns.plt.text(.5,50,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
-	sns.plt.ylabel("T Test Values, mediation values of node's nieghbors versus mediation of node's non-neighbors")
+	sns.plt.ylabel("T Test Values, mediation values of node's nieghbors \n versus mediation of node's non-neighbors")
+	f.axes[0].set_xticks([''])
+	sns.plt.legend(bbox_to_anchor=[1,1.05],ncol=7,columnspacing=10)
+	sns.plt.savefig('%s/dynamic_mod/figures/%s_mediation_t_test.pdf'%(homedir,run_version))
 
 def network_labels(atlas):
 	if atlas == 'gordon':
