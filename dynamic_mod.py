@@ -22,12 +22,12 @@ import glob
 import math
 from collections import Counter
 import matplotlib.pylab as plt
+import matplotlib as mpl
+from matplotlib import patches
 plt.rcParams['pdf.fonttype'] = 42
-plt.rc('font', family='sans-serif') 
-plt.rc('font', serif='Helvetica') 
-plt.rc('text', usetex='false') 
-# matplotlib.rcParams.update({'font.size': 22})
-# plt.rcParams['font.family'] = 'Helvetica'
+path = '/home/despoB/mb3152/anaconda/lib/python2.7/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
+prop = mpl.font_manager.FontProperties(fname=path)
+mpl.rcParams['font.family'] = prop.get_name()
 import seaborn as sns
 import powerlaw
 from richclub import preserve_strength, RC
@@ -39,12 +39,15 @@ import random
 global hcp_subjects
 hcp_subjects = os.listdir('/home/despoB/connectome-data/')
 hcp_subjects.sort()
-# global pc_vals 
-# global fit_matrices
-# global task_perf
+global pc_vals 
+global fit_matrices
+global task_perf
 import statsmodels.api as sm
 from statsmodels.stats.mediation import Mediation
 from scipy import stats, linalg
+global homedir
+# homedir = '/Users/Maxwell/HWNI/'
+homedir = '/home/despoB/mb3152/'
 
 def partial_corr(C):
     """
@@ -119,10 +122,10 @@ def print_performance_measure_used(task):
 
 def task_performance(subjects,task):
 	all_performance = []
-	bdf = pd.read_csv('/home/despoB/mb3152/dynamic_mod/os_behavior_data_900.csv')	
+	bdf = pd.read_csv('%s/dynamic_mod/os_behavior_data_900.csv'%(homedir))	
 	for subject in subjects:
 		try:
-			files = glob.glob('/home/despoB/mb3152/scanner_performance_data/%s_tfMRI_*%s*_Stats.csv' %(subject,task))
+			files = glob.glob('%s/scanner_performance_data/%s_tfMRI_*%s*_Stats.csv' %(homedir,subject,task))
 			performance = []
 			for f in files:
 				df = pd.read_csv(f)
@@ -208,7 +211,7 @@ def behavioral_performance(subjects,tasks):
 				results[id_s,id_t] = np.nan
 	return results
 
-def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_array=True,plot_corr=True,label=False,reorder=True):
+def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_array=True,plot_corr=True,label=True,reorder=True,colors=['None'],line=False,rectangle=False,draw_legend=False,colorbar=False):
 	if reorder == True:
 		swap_dict = {}
 		index = 0
@@ -259,9 +262,21 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 			x_ticks.append(len(membership)-i)
 			y_names.append(name)
 			x_names.append(name)
-	sns.set(context="paper", font="Helvetica",font_scale=1.2)
+	sns.set(style='dark',context="paper",font='Helvetica',font_scale=1.2)
 	# Set up the matplotlib figure
-	f, ax = plt.subplots(figsize=(12, 9))
+	# f, ax = plt.subplots(figsize=(12, 9))
+	y_names.reverse()
+	std = np.nanstd(corr_mat)
+	mean = np.nanmean(corr_mat)
+	vmin = mean - (std*2)
+	vmax = mean + (std*2)
+	if label != True:
+		y_names = ['']
+		x_names = ['']
+	# cmap = sns.cubehelix_palette(as_cmap=True, rot=-.3, light=1)
+	# cmap=sns.diverging_palette(255,0,s=99,sep=80, n=15,center='dark',as_cmap=True)
+	fig = sns.clustermap(corr_mat,yticklabels=y_names,xticklabels=x_names,cmap=sns.diverging_palette(260,10,sep=10, n=20,as_cmap=True),rasterized=True,col_colors=colors,row_colors=colors,row_cluster=False,col_cluster=False,**{'vmin':vmin,'vmax':vmax,'figsize':(15.567,15)})
+	ax = fig.fig.axes[4]
 	# Draw the heatmap using seaborn
 	y_names.reverse()
 	if block_lower:
@@ -269,28 +284,47 @@ def plot_corr_matrix(matrix,membership,out_file=None,block_lower=False,return_ar
 	ax.set_yticks(x_ticks)
 	ax.set_xticks(y_ticks)
 	y_names.reverse()
-	std = np.nanstd(corr_mat)
-	mean = np.nanmean(corr_mat)
-	# sns.heatmap(corr_mat,square=True,yticklabels=y_names,xticklabels=x_names,vmin=-3,vmax=3,linewidths=0.0,cmap="RdBu_r")
-	vmin = mean - (std*2)
-	vmax = mean + (std*2)
-	sns.heatmap(corr_mat,square=True,vmin=vmin,vmax=vmax,yticklabels=y_names,xticklabels=x_names,cmap=sns.diverging_palette(255,0,s=99,sep=80, n=15,center='dark',as_cmap=True),rasterized=True)
 	if reorder == True:
 		membership.sort()
 	# Use matplotlib directly to emphasize known networks
-	for i, network in enumerate(membership):
-		if network != membership[i - 1]:
-			ax.axhline(len(membership) - i, c='white',linewidth=.75)
-			ax.axvline(i, c='white',linewidth=.75)
-	f.tight_layout()
+	if line == True or rectangle == True:
+		if len(colors) != len(membership):
+			colors = np.arange(len(membership))
+		for i,network,color, in zip(np.arange(len(membership)),membership,colors):
+			if network != membership[i - 1]:
+				if len(colors) != len(membership):
+					color = 'white'
+				if line == True:
+					ax.axhline(len(membership) - i, c=color,linewidth=.5,label=network)
+					ax.axhline(len(membership) - i, c='black',linewidth=.5)
+					ax.axvline(i, c='black',linewidth=.5)
+				if rectangle == True:
+					ax.add_patch(patches.Rectangle((i+len(membership[membership==network]),264-i),len(membership[membership==network]),len(membership[membership==network]),facecolor="none",edgecolor=color,linewidth="1",angle=180))
+	fig.ax_col_colors.add_patch(patches.Rectangle((0,0),264,1,facecolor="None",edgecolor='black',lw=2))
+	fig.ax_row_colors.add_patch(patches.Rectangle((0,0),1,264,facecolor="None",edgecolor='black',lw=2))	
+	col = fig.ax_col_colors.get_position()
+	fig.ax_col_colors.set_position([col.x0, col.y0, col.width*1, col.height*.35])
+	col = fig.ax_row_colors.get_position()
+	fig.ax_row_colors.set_position([col.x0+col.width*(1-.35), col.y0, col.width*.35, col.height*1])
+	fig.ax_col_dendrogram.set_visible(False)
+	fig.ax_row_dendrogram.set_visible(False)
+	if draw_legend == True:
+		leg = fig.ax_heatmap.legend(bbox_to_anchor=[.98,1.1],ncol=5)
+	for legobj in leg.legendHandles:
+		legobj.set_linewidth(2.5)
+	if colorbar == False:
+		fig.cax.set_visible(False)
+	# plt.tight_layout()
 	if out_file != None:
 		plt.savefig(out_file)
-		plt.close()
+		# plt.close()
 	if plot_corr == True:
 		plt.show()
 	if return_array == True:
-		plt.close()
+		# plt.close()
 		return corr_mat
+	return fig
+
 
 def make_static_matrix(subject,task,project,atlas,scrub=False):
 	hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
@@ -474,24 +508,24 @@ def check_scrubbed_normalize(subjects,task,atlas='power'):
 			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
 			assert np.diff([cost,graph.density()])[0] < .005
 
-def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False,scrubbed=False):
+def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False,scrubbed=False,homedir=homedir):
 	"""
 	run graph metrics or load them
 	"""
 	if run == False:
 		# done_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version)) 
 		# assert (done_subjects == subjects).all() #make sure you are getting subjects / subjects order you wanted and ran last time.
-		subject_pcs = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pcs_%s.npy' %(project,task,atlas,run_version)) 
-		subject_wmds = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmds_%s.npy' %(project,task,atlas,run_version)) 
-		subject_mods = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_mods_%s.npy' %(project,task,atlas,run_version)) 
+		subject_pcs = np.load('%sdynamic_mod/results/%s_%s_%s_pcs_%s.npy' %(homedir,project,task,atlas,run_version)) 
+		subject_wmds = np.load('%sdynamic_mod/results/%s_%s_%s_wmds_%s.npy' %(homedir,project,task,atlas,run_version)) 
+		subject_mods = np.load('%sdynamic_mod/results/%s_%s_%s_mods_%s.npy' %(homedir,project,task,atlas,run_version)) 
 		try:
-			subject_communities = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_coms_%s.npy' %(project,task,atlas,run_version)) 
+			subject_communities = np.load('%sdynamic_mod/results/%s_%s_%s_coms_%s.npy' %(homedir,project,task,atlas,run_version)) 
 		except:
 			print 'Loading alternative community numbers'
-			subject_communities = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_coms_fz_wc.npy' %(project,task,atlas)) 
-		matrices = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_matrices_%s.npy' %(project,task,atlas,run_version)) 
-		thresh_matrices = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_z_matrices_%s.npy' %(project,task,atlas,run_version))
-		finished_subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version))
+			subject_communities = np.load('%sdynamic_mod/results/%s_%s_%s_coms_fz_wc.npy' %(homedir,project,task,atlas)) 
+		matrices = np.load('%sdynamic_mod/results/%s_%s_%s_matrices_%s.npy' %(homedir,project,task,atlas,run_version)) 
+		thresh_matrices = np.load('%sdynamic_mod/results/%s_%s_%s_z_matrices_%s.npy' %(homedir,project,task,atlas,run_version))
+		finished_subjects = np.load('%sdynamic_mod/results/%s_%s_%s_subs_%s.npy' %(homedir,project,task,atlas,run_version))
 	elif run == True:
 		finished_subjects = []
 		variables = []
@@ -500,9 +534,9 @@ def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False,scrubb
 		for subject in subjects:
 			s_matrix = []
 			if scrubbed == True:
-				files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task)) # FOR SCRUBBING ONLY
+				files = glob.glob('%sdynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(homedir,atlas,subject,atlas,task)) # FOR SCRUBBING ONLY
 			if scrubbed == False:
-				files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
+				files = glob.glob('%sdynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(homedir,atlas,subject,atlas,task))
 			for f in files:
 				if scrubbed == True:
 					# FOR SCRUBBING ONLY
@@ -551,13 +585,13 @@ def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False,scrubb
 			subject_wmds.append(r[2])
 			subject_communities.append(r[3])
 			assert r[4] == s #make sure it returned the order of subjects/results correctly
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pcs_%s.npy' %(project,task,atlas,run_version),np.array(subject_pcs))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmds_%s.npy' %(project,task,atlas,run_version),np.array(subject_wmds))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_mods_%s.npy' %(project,task,atlas,run_version),np.array(subject_mods))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version),np.array(finished_subjects))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_matrices_%s.npy'%(project,task,atlas,run_version),np.array(matrices))
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_coms_%s.npy' %(project,task,atlas,run_version),np.array(subject_communities)) 
-		np.save('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_z_matrices_%s.npy'%(project,task,atlas,run_version),np.array(thresh_matrices))
+		np.save('%sdynamic_mod/results/%s_%s_%s_pcs_%s.npy' %(homedir,project,task,atlas,run_version),np.array(subject_pcs))
+		np.save('%sdynamic_mod/results/%s_%s_%s_wmds_%s.npy' %(homedir,project,task,atlas,run_version),np.array(subject_wmds))
+		np.save('%sdynamic_mod/results/%s_%s_%s_mods_%s.npy' %(homedir,project,task,atlas,run_version),np.array(subject_mods))
+		np.save('%sdynamic_mod/results/%s_%s_%s_subs_%s.npy' %(homedir,project,task,atlas,run_version),np.array(finished_subjects))
+		np.save('%sdynamic_mod/results/%s_%s_%s_matrices_%s.npy'%(homedir,project,task,atlas,run_version),np.array(matrices))
+		np.save('%sdynamic_mod/results/%s_%s_%s_coms_%s.npy' %(homedir,project,task,atlas,run_version),np.array(subject_communities)) 
+		np.save('%sdynamic_mod/results/%s_%s_%s_z_matrices_%s.npy'%(homedir,project,task,atlas,run_version),np.array(thresh_matrices))
 	subject_mods = np.array(subject_mods)
 	subject_pcs = np.array(subject_pcs)
 	subject_wmds = np.array(subject_wmds)
@@ -590,60 +624,102 @@ def pc_edge_correlation(subject_pcs,matrices,path):
 		np.save(path,pc_edge_corr)
 	return pc_edge_corr
 
-def pc_edge_q_figure(task):
+
+def pc_edge_q_figure(tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL']):
 	driver = 'PC'
 	project='hcp'
 	atlas = 'power'
 	run_version = 'fz'
-	# task = 'WM'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
-	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %(project,task,atlas,run_version))
-	static_results = graph_metrics(subjects,task,atlas,run_version)
-	subject_pcs = static_results['subject_pcs']
-	subject_mods = static_results['subject_mods']
-	subject_wmds = static_results['subject_wmds']
-	matrices = static_results['matrices']
-	task_perf = task_performance(subjects,task)
-	assert subject_pcs.shape[0] == len(subjects)
-	mean_pc = np.nanmean(subject_pcs,axis=0)
-	mean_wmd = np.nanmean(subject_wmds,axis=0)
-	mod_pc_corr = np.zeros(subject_pcs.shape[1])
-	for i in range(subject_pcs.shape[1]):
-		mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
-	mod_wmd_corr = np.zeros(subject_wmds.shape[1])
-	for i in range(subject_wmds.shape[1]):
-		mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
-	if driver == 'PC':
-		predict_nodes = np.where(mod_pc_corr>0.0)[0]
-		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
-		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(project,task,atlas)))
-	if driver == 'WMD':
-		predict_nodes = np.where(mod_wmd_corr>0.0)[0]
-		local_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
-		pc_edge_corr = np.arctanh(pc_edge_correlation(subject_wmds,matrices,path='/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(project,task,atlas)))
+	q_corr_matrix = []
+	pc_corr_matrix = []
 	#order by primary versus secondary networks. 
 	network_order = ['Auditory','Sensory/somatomotor Hand','Sensory/somatomotor Mouth','Visual','Dorsal attention','Ventral attention',
 	'Cingulo-opercular Task Control','Salience','Fronto-parietal Task Control','Default mode','Cerebellar','Subcortical','Memory retrieval?','Uncertain']
-
+	colors = np.array(pd.read_csv('%smodularity/Consensus264.csv'%(homedir),header=None)[34].values)
+	colors[colors=='Pale blue'] = '#ADD8E6'
+	colors[colors=='Teal'] = '#008080'
 	swap_indices = []
 	for nn in network_order:
 		original_idx = np.where(network_names == nn)
 		for i in range(len(original_idx[0])):
 			swap_indices.append(original_idx[0][i])
-	plot_corr_matrix(np.nanmean(pc_edge_corr[predict_nodes,:,:],axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(task,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
-	n_nodes = pc_edge_corr.shape[0]
-	q_edge_corr = np.zeros((n_nodes,n_nodes))
-	for i,j in combinations(range(n_nodes),2):
-		ijqcorr = nan_pearsonr(matrices[:,i,j],subject_mods)[0]
-		q_edge_corr[i,j] = ijqcorr
-		q_edge_corr[j,i] = ijqcorr
-	# plot_corr_matrix(q_edge_corr,network_names.copy(),out_file=None,block_lower=False,return_array=True,plot_corr=True,label=False)
-	plot_corr_matrix(q_edge_corr[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_edgecorr_matrix.pdf'%(task,driver,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
+	locality_df = pd.DataFrame()
+	for task in tasks:
+		print task
+		subjects = np.load('%sdynamic_mod/results/%s_%s_%s_subs_%s.npy' %(homedir,project,task,atlas,run_version))
+		static_results = graph_metrics(subjects,task,atlas,run_version)
+		subject_pcs = static_results['subject_pcs']
+		subject_mods = static_results['subject_mods']
+		subject_wmds = static_results['subject_wmds']
+		matrices = static_results['matrices']
+		task_perf = task_performance(subjects,task)
+		scipy.stats.zscore(task_perf)
+		assert subject_pcs.shape[0] == len(subjects)
+		mean_pc = np.nanmean(subject_pcs,axis=0)
+		mean_wmd = np.nanmean(subject_wmds,axis=0)
+		mod_pc_corr = np.zeros(subject_pcs.shape[1])
+		for i in range(subject_pcs.shape[1]):
+			mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
+		mod_wmd_corr = np.zeros(subject_wmds.shape[1])
+		for i in range(subject_wmds.shape[1]):
+			mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
+		if driver == 'PC':
+			predict_nodes = np.where(mod_pc_corr>0.0)[0]
+			local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
+			pc_edge_corr = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='%s/dynamic_mod/results/%s_%s_%s_pc_edge_corr_z.npy' %(homedir,project,task,atlas)))
+		# pc_edge_corr_new = np.arctanh(pc_edge_correlation(subject_pcs,matrices,path='NONE'))
+		# print (pc_edge_corr == pc_edge_corr_new).all()
+		if driver == 'WMD':
+			predict_nodes = np.where(mod_wmd_corr>0.0)[0]
+			local_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
+			pc_edge_corr = np.arctanh(pc_edge_correlation(subject_wmds,matrices,path='%s/dynamic_mod/results/%s_%s_%s_wmd_edge_corr_z.npy' %(homedir,project,task,atlas)))
+		n_nodes = pc_edge_corr.shape[0]
+		q_edge_corr = np.zeros((n_nodes,n_nodes))
+		perf_edge_corr = np.zeros((n_nodes,n_nodes))
+		for i,j in combinations(range(n_nodes),2):
+			ijqcorr = nan_pearsonr(matrices[:,i,j],subject_mods)[0]
+			q_edge_corr[i,j] = ijqcorr
+			q_edge_corr[j,i] = ijqcorr
+			if task not in ['WM','RELATIONAL','SOCIAL','LANGUAGE']:
+				continue
+			ijqcorr = nan_pearsonr(matrices[:,i,j],task_perf)[0]
+			perf_edge_corr[i,j] = ijqcorr
+			perf_edge_corr[j,i] = ijqcorr
+		pc_corr_matrix.append(np.nanmean(pc_edge_corr[predict_nodes,:,:],axis=0))
+		q_corr_matrix.append(q_edge_corr)
+		m = np.load('%s/dynamic_mod/results/full_med_matrix_new_%s.npy'%(homedir,task))
+		mean_conn = np.nanmean(matrices,axis=0)
+		e_tresh = np.percentile(mean_conn,75)	
+		m = np.abs(m)
+		for i in range(264):
+			real_t = scipy.stats.ttest_ind(np.abs(m[i][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1)),np.abs(m[i][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1)))[0]
+			if mod_pc_corr[i] > 0.0:
+				locality_df = locality_df.append({"Nodes' Correlation with Q":'Positive R Nodes','t':real_t,'Task':task},ignore_index=True)
+			else:
+				locality_df = locality_df.append({"Nodes' Correlation with Q":'Negative R Nodes','t':real_t,'Task':task},ignore_index=True)
+		locality_df.dropna(inplace=True)
+		stat = tstatfunc(locality_df.t[(locality_df["Nodes' Correlation with Q"]=='Positive R Nodes')&(locality_df["Task"]==task)],locality_df.t[(locality_df["Nodes' Correlation with Q"]=='Negative R Nodes')&(locality_df["Task"]==task)])
+		plot_corr_matrix(np.nanmean(q_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names.copy()[swap_indices],out_file='%s/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(homedir,tasks,run_version),block_lower=False,return_array=False,plot_corr=True,label=False,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True)
+		1/0
+		if task in ['WM','RELATIONAL','SOCIAL','LANGUAGE']:
+			print nan_pearsonr(perf_edge_corr.reshape(-1),np.nanmean(pc_edge_corr[predict_nodes,:,:],axis=0).reshape(-1))
+			plot_corr_matrix(perf_edge_corr[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_edge_perf_corr_matrix.pdf'%(homedir,tasks,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
+		plot_corr_matrix(np.nanmean(m[predict_nodes,:,:],axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_%s_mediation_matrix.pdf'%(homedir,tasks,driver,run_version),block_lower=False,return_array=True,plot_corr=False,label=False,reorder=False)
+		plot_corr_matrix(np.nanmean(pc_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_edge_q_corr_matrix.pdf'%(homedir,tasks,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
+		plot_corr_matrix(np.nanmean(q_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_%s_edgecorr_matrix.pdf'%(homedir,tasks,driver,run_version),block_lower=False,return_array=True,plot_corr=True,label=False,reorder=False)
+
+	sns.set_style("white")
+	sns.set_style("ticks")
+	sns.set(context="paper",font='Helvetica',font_scale=1.2)
+	sns.violinplot(data=locality_df[locality_df["Nodes' Correlation with Q"]=='Positive R Nodes'],y='t',x='Task',hue='Task',inner='quartile',palette=sns.palettes.color_palette('Paired',7))
+	# sns.plt.text(.5,50,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
+	sns.plt.ylabel("T Test Values, mediation values of node's nieghbors versus mediation of node's non-neighbors")
 
 def network_labels(atlas):
 	if atlas == 'gordon':
 		name_dict = {}
-		df = pd.read_excel('/home/despoB/mb3152/dynamic_mod/Parcels.xlsx')
+		df = pd.read_excel('%sdynamic_mod/Parcels.xlsx'%(homedir))
 		df.Community[df.Community=='None'] = 'Uncertain'
 		for i,com in enumerate(np.unique(df.Community.values)):
 			name_dict[com] = i
@@ -652,9 +728,9 @@ def network_labels(atlas):
 			known_membership[i] = name_dict[df.Community[i]]
 		network_names = np.array(df.Community.values).astype(str)
 	if atlas == 'power':
-		known_membership = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[31].values)
+		known_membership = np.array(pd.read_csv('%smodularity/Consensus264.csv'%(homedir),header=None)[31].values)
 		known_membership[known_membership==-1] = 0
-		network_names = np.array(pd.read_csv('/home/despoB/mb3152/modularity/Consensus264.csv',header=None)[36].values)
+		network_names = np.array(pd.read_csv('%smodularity/Consensus264.csv'%(homedir),header=None)[36].values)
 	name_int_dict = {}
 	for name,int_value in zip(network_names,known_membership):
 		name_int_dict[int_value] = name
@@ -1217,8 +1293,7 @@ def mediation(task):
 	atlas = 'power'
 	project='hcp'
 	known_membership,network_names,num_nodes,name_int_dict = network_labels(atlas)
-	# task = 'REST'
-	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+	subjects = np.load('%s/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %(homedir,'hcp',task,atlas))
 	static_results = graph_metrics(subjects,task,atlas,run_version='fz')
 	matrices = static_results['matrices']
 	subject_pcs = static_results['subject_pcs']
@@ -1229,7 +1304,7 @@ def mediation(task):
 	mean_conn = np.nanmean(matrices,axis=0)
 	e_tresh = np.percentile(mean_conn,85)
 	try:
-		m = np.load('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task))
+		m = np.load('%s/dynamic_mod/results/full_med_matrix_new_%s.npy'%(homedir,task))
 	except:
 		subject_pcs[np.isnan(subject_pcs)] = 0.0
 		m = np.zeros((264,264,264))
@@ -1259,6 +1334,9 @@ def mediation(task):
 	sns.set_style("ticks")
 	sns.violinplot(data=locality_df,y='t',x="Nodes' Correlation with Q",order = ['+','-'],inner='quartile',palette=np.array(sns.color_palette("cubehelix", 10))[[7,9]])
 	sns.plt.text(.5,50,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
+	sns.plt.ylabel('T Test Values, mediation values of nieghbors versus mediation of non-neighbors')
+	sns.plt.savefig('%s/dynamic_mod/figures/mediation_t_test_%s.pdf'%(homedir,task))
+	sns.plt.show()
 
 def sm_null():
 	try:
@@ -2233,7 +2311,7 @@ def corrfunc(x, y, **kws):
 
 def tstatfunc(x, y):
 	t, p = scipy.stats.ttest_ind(x,y)
-	return "r=%s,p=%s" %(np.around(t,3),np.around(p,5))
+	return "t=%s,p=%s" %(np.around(t,3),np.around(p,5))
 
 def plot_connectivity_results(data,x,y,save_str):
 	sns.set_style("white")
@@ -2401,10 +2479,10 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		# 	subject_mods = sm.GLM(subject_mods,sm.add_constant(subject_motion)).fit().resid_response
 		# 	assert np.isclose(0.0,pearsonr(subject_mods,subject_motion)[0]) == True
 
-		predict_nodes = np.where(mod_pc_corr>0.0)[0]
-		local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
-		wmd_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
-		wmd_local_predict_nodes = np.where(mod_wmd_corr>0.0)[0]
+		# predict_nodes = np.where(mod_pc_corr>0.0)[0]
+		# local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
+		# wmd_predict_nodes = np.where(mod_wmd_corr<0.0)[0]
+		# wmd_local_predict_nodes = np.where(mod_wmd_corr>0.0)[0]
 
 		if control_com == True and control_motion == True:
 			model_vars = np.array([subject_motion,subject_communities]).transpose()
