@@ -425,15 +425,15 @@ def preferential_routing_multi_density(variables):
 				if all_shortest == 'bc':
 					sps_edge_scores.append(orig_bc_sps-np.sum(np.array(graph.shortest_paths())[community_matrix!=1]))
 				graph.add_edge(edge[0],edge[1],weight=1)
-			q_edge_scores = np.array(q_edge_scores)
-			sps_edge_scores = np.array(sps_edge_scores)
+			q_edge_scores = np.array(q_edge_scores)#Q when edge removed - original Q. High means increase in Q when edge removed.
+			sps_edge_scores = np.array(sps_edge_scores)#original sps minus sps when edge removed. Higher value means more efficient.
 			if len(np.unique(sps_edge_scores)) > 1:
 				q_edge_scores = scipy.stats.zscore(scipy.stats.rankdata(q_edge_scores,method='min'))
 				sps_edge_scores = scipy.stats.zscore(scipy.stats.rankdata(sps_edge_scores,method='min'))
 				scores = (q_edge_scores*q_ratio) + (sps_edge_scores*(1-q_ratio))
 			else:
 				scores = scipy.stats.rankdata(q_edge_scores,method='min')
-			scores = scores.astype(int)
+			1/0
 		if metric == 'q':
 			edges = np.array(delete_edges)[np.argsort(scores)][int(-(graph.ecount()*.05)):]
 			edges = np.array(list(edges)[::-1])
@@ -499,15 +499,11 @@ def preferential_routing_multi(variables):
 				if all_shortest == 'bc':
 					sps_edge_scores.append(orig_bc_sps-np.sum(np.array(graph.shortest_paths())[community_matrix!=1]))
 				graph.add_edge(edge[0],edge[1],weight=1)
-			q_edge_scores = np.array(q_edge_scores)
-			sps_edge_scores = np.array(sps_edge_scores)
+			q_edge_scores = np.array(q_edge_scores) 
+			sps_edge_scores = np.array(sps_edge_scores) 
 			if len(np.unique(sps_edge_scores)) > 1:
 				q_edge_scores = scipy.stats.zscore(scipy.stats.rankdata(q_edge_scores,method='min'))
 				sps_edge_scores = scipy.stats.zscore(scipy.stats.rankdata(sps_edge_scores,method='min'))
-				# sps_edges_scores = scipy.stats.rankdata(sps_edges_scores,method='min')
-				# sps_bc_edge_scores = np.arange(int(graph.ecount()))[np.argsort(sps_bc_edge_scores).astype(int)]
-				# q_edge_scores = np.arange(int(graph.ecount()))[np.argsort(q_edge_scores).astype(int)]
-				# scores = q_edge_scores + sps_edge_scores
 				scores = (q_edge_scores*q_ratio) + (sps_edge_scores*(1-q_ratio))
 			else:
 				scores = scipy.stats.rankdata(q_edge_scores,method='min')
@@ -619,8 +615,10 @@ def make_small_world(variables):
 	graph.es["weight"] = np.ones(graph.ecount())
 	return graph
 
-def preferential_routing(n_nodes=300,iters=100,cores=40,all_shortest=False,q_ratio=.9):
+def preferential_routing(n_nodes=300,iters=100,cores=40,all_shortest='all',q_ratio=.9):
 	if n_nodes == 100:
+		density= 0.05
+	if n_nodes == 101:
 		density= 0.05
 	if n_nodes == 200:
 		density = 0.025
@@ -655,18 +653,18 @@ def preferential_routing(n_nodes=300,iters=100,cores=40,all_shortest=False,q_rat
 			both_pc_rc.append(r[1])
 			both_deg_rc.append(r[2])
 			both_graphs.append(r[3])
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'w+') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'w+') as f:
 		pickle.dump(none_graphs,f)
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'w+') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'w+') as f:
 		pickle.dump(both_graphs,f)
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(none_pc_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(none_deg_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(both_pc_rc))
-	np.save('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(both_deg_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_pc_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(none_pc_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_deg_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(none_deg_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(both_pc_rc))
+	np.save('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_deg_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio),np.array(both_deg_rc))
 
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_graphs_none_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		none_graphs = pickle.load(f)
-	with open('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
+	with open('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio),'r') as f:
 		both_graphs = pickle.load(f)
 	none_mods = []
 	for g in none_graphs:
@@ -738,8 +736,8 @@ def analyze_param_results():
 	df = pd.DataFrame(columns = ['Model','Variable','Q_SP Ratio','Value'])
 	mean_df = pd.DataFrame(columns = ['Model','Variable','Q_SP Ratio','Value'])
 	for q_ratio in np.arange(50,101)*0.01:
-		pc_graphs = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio))
-		pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+		pc_graphs = np.load('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio))
+		pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
 		sp = []
 		bcsp = []
 		mod = []
@@ -781,7 +779,7 @@ def analyze_param_results():
 			d[:,i] = temp_df.Value[temp_df['Q_SP Ratio']==q_ratio].values
 		sns.tsplot(d,np.arange(50,101)*0.01,ax=ax,color =c,ci=99)
 		ax.set_title(param)
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/multi_parameter_figure.pdf')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/multi_parameter_figure_new.pdf')
 	sns.plt.show()
 	sns.plt.close()
 
@@ -793,7 +791,7 @@ def analyze_param_results():
 	    return norm_df
 	norm_df = normalize(df,'Variable','Value')
 	sns.tsplot(data=norm_df,time='Q_SP Ratio',unit='Model',condition='Variable',value='Value')
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/parameter_figure.pdf')
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/parameter_figure_new.pdf')
 	sns.plt.show()
 
 def analyze_results():
@@ -807,11 +805,11 @@ def analyze_results():
 	all_shortest = 'all'
 	q_ratio = .77
 	percent = .95
-	deg_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
-	pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
-	none_pc = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_pc_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
-	none_deg = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_deg_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
-	pc_graphs = np.load('/home/despoB/mb3152/dynamic_mod/results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio))
+	deg_both = np.load('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_deg_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+	pc_both = np.load('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_pc_both_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+	none_pc = np.load('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_pc_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+	none_deg = np.load('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_deg_none_%s_%s_%s_%s.npy'%(iters,n_nodes,all_shortest,q_ratio))
+	pc_graphs = np.load('/home/despoB/mb3152/dynamic_mod/results/new_gen_results/rich_club_gen_graphs_both_%s_%s_%s_%s'%(iters,n_nodes,all_shortest,q_ratio))
 	idx = idx = np.zeros(shape=len(pc_graphs)).astype(bool)
 	pcs = []
 	for i in range(len(pc_graphs)):
@@ -838,7 +836,7 @@ def analyze_results():
 	otherax.plot(scipy.stats.ttest_ind(pc_both[:,:int(n_nodes*percent)],none_pc[:,:int(n_nodes*percent)])[0],color='green',label='T Score')
 	sns.plt.legend()
 	sns.plt.xlim(0,int(n_nodes*percent))
-	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_%s_generative.pdf'%(n_nodes,iters,all_shortest,q_ratio),dpi=1000)
+	sns.plt.savefig('/home/despoB/mb3152/dynamic_mod/figures/%s_%s_%s_%s_generative_new.pdf'%(n_nodes,iters,all_shortest,q_ratio),dpi=1000)
 	sns.plt.show()
 	bins = 10
 	sns.plt.hist(np.array(pcs).reshape(-1),histtype='stepfilled',normed=True,alpha=0.35,color='yellow',label='Model',stacked=True,bins=bins)
