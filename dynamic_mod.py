@@ -1,4 +1,4 @@
-#!/home/despoB/mb3152/anaconda/bin/python
+#!/home/despoB/mb3152/anaconda2/bin/python
 import brain_graphs
 import pandas as pd
 import os
@@ -25,7 +25,7 @@ import matplotlib.pylab as plt
 import matplotlib as mpl
 from matplotlib import patches
 plt.rcParams['pdf.fonttype'] = 42
-path = '/home/despoB/mb3152/anaconda/lib/python2.7/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
+path = '/home/despoB/mb3152/anaconda2/lib/python2.7/site-packages/matplotlib/mpl-data/fonts/ttf/Helvetica.ttf'
 prop = mpl.font_manager.FontProperties(fname=path)
 mpl.rcParams['font.family'] = prop.get_name()
 import seaborn as sns
@@ -33,7 +33,6 @@ import powerlaw
 from richclub import preserve_strength, RC
 from multiprocessing import Pool
 sys.path.append('/home/despoB/mb3152/dynamic_mod/')
-from complexity import FunctionalComplexity_Linear
 from sklearn import linear_model, metrics
 import random
 global hcp_subjects
@@ -49,6 +48,87 @@ global homedir
 # homedir = '/Users/Maxwell/HWNI/'
 homedir = '/home/despoB/mb3152/'
 
+
+# cost = .9
+# m = np.load('/home/despoB/mb3152/diverse_club/graphs/REST.npy')
+# t = brain_graphs.threshold(m.copy(),cost)
+# np.fill_diagonal(m,0.0)
+# m[np.isnan(m)] = 0.0
+# m[m<0] = 0
+# print (m == t).all()
+
+def participation_coef(W, ci, degree='undirected'):
+    '''
+    Participation coefficient is a measure of diversity of intermodular
+    connections of individual nodes.
+    Parameters
+    ----------
+    W : NxN np.ndarray
+        binary/weighted directed/undirected connection matrix
+    ci : Nx1 np.ndarray
+        community affiliation vector
+    degree : str
+        Flag to describe nature of graph 'undirected': For undirected graphs
+                                         'in': Uses the in-degree
+                                         'out': Uses the out-degree
+    Returns
+    -------
+    P : Nx1 np.ndarray
+        participation coefficient
+    '''
+    if degree == 'in':
+        W = W.T
+
+    _, ci = np.unique(ci, return_inverse=True)
+    ci += 1
+
+    n = len(W)  # number of vertices
+    Ko = np.sum(W, axis=1)  # (out) degree
+    Gc = np.dot((W != 0), np.diag(ci))  # neighbor community affiliation
+    Kc2 = np.zeros((n,))  # community-specific neighbors
+
+    for i in range(1, int(np.max(ci)) + 1):
+        Kc2 += np.square(np.sum(W * (Gc == i), axis=1))
+
+    P = np.ones((n,)) - Kc2 / np.square(Ko)
+    # P=0 if for nodes with no (out) neighbors
+    P[np.where(np.logical_not(Ko))] = 0
+
+    return P
+
+# tasks = ['WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','MOTOR','REST']
+
+# tasks = ['REST']
+# for task in tasks:
+# 	print task
+# 	for cost in np.arange(1,25)*0.01:
+# 		m = np.load('/home/despoB/mb3152/diverse_club/graphs/%s.npy'%(task))
+		
+# 		t = brain_graphs.threshold(m.copy(),cost)
+
+
+# 		assert np.sum(abs(np.tril(t) - np.triu(t).transpose())) == 0.0
+# 		print cost, np.min(t[t>0]), np.mean(t[t>0])
+# 		# print np.max(t[t>0])
+# 		# continue
+
+# 		g = brain_graphs.matrix_to_igraph(m.copy(),cost)
+# 		for i in range(264):
+# 			assert np.isclose(g[i,:],t[i,:]).all() == True
+# 			assert np.isclose(g.strength(i,weights='weight'), np.sum(t[i]))
+# 		assert g.has_multiple() == False
+# 		assert g.is_directed() == False
+# 		assert g.is_weighted()
+# 		assert np.isclose(t,np.array(g.get_adjacency(attribute='weight').data)).all() == True
+# 		assert np.sum(abs(t-np.array(g.get_adjacency(attribute='weight').data))) == 0.0
+# 		network = brain_graphs.brain_graph(g.community_infomap(edge_weights='weight'))
+# 		pc = network.pc
+# 		pc[np.isnan(pc)] = 0.0
+# 		assert np.isclose(pc,participation_coef(t,np.array(network.community.membership))).all() == True
+# 		assert np.sum(abs(pc-participation_coef(t,np.array(network.community.membership)))) < 1e-10
+# 		# print cost, g.ecount()
+# 		# print cost, g.ecount()
+# 1/0
 def generate_correlation_map(x, y):
 	"""
 	Correlate each n with each m.
@@ -305,6 +385,8 @@ def behavioral_performance(subjects,tasks):
 				results[id_s,id_t] = np.nan
 	return results
 
+# plot_corr_matrix(matrix[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file=None,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True,rectangle=False)
+
 def plot_corr_matrix(matrix,membership,colors,out_file=None,reorder=True,line=False,rectangle=False,draw_legend=False,colorbar=False):	
 	"""
 	matrix: square, whatever you like
@@ -377,6 +459,28 @@ def plot_corr_matrix(matrix,membership,colors,out_file=None,reorder=True,line=Fa
 	if out_file == None:
 		plt.show()
 	return fig
+
+def plot_corr_matrix2(matrix,membership):	
+	"""
+	matrix: square, whatever you like
+	membership: the community (or whatever you like of each node in the matrix)
+	colors: the colors of each node in the matrix (same order as membership)
+	out_file: save the file here, will supress plotting, do None if you want to plot it.
+	line: draw those little lines to divide up communities
+	rectangle: draw colored rectangles around each community
+	draw legend: draw legend...
+	colorbar: colorbar...
+	"""
+	sns.set(style='dark',context="paper",font='Helvetica',font_scale=1.2)
+	std = np.nanstd(matrix)
+	mean = np.nanmean(matrix)
+	np.fill_diagonal(matrix,0.0)
+	fig = sns.heatmap(matrix,yticklabels=[''],xticklabels=[''],cmap=sns.diverging_palette(260,10,sep=10, n=20,as_cmap=True),rasterized=True,**{'vmin':mean - (std*2),'vmax':mean + (std*2)})
+	# Use matplotlib directly to emphasize known networks
+	for i,network in zip(np.arange(len(membership)),membership):
+		if network != membership[i - 1]:
+			fig.figure.axes[0].add_patch(patches.Rectangle((i+len(membership[membership==network]),len(membership)-i),len(membership[membership==network]),len(membership[membership==network]),facecolor="none",edgecolor='black',linewidth="2",angle=180))
+	sns.plt.show()
 
 def make_static_matrix(subject,task,project,atlas,scrub=False):
 	hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
@@ -509,23 +613,26 @@ def check_num_nodes(subjects,task,atlas='power'):
 		num_nodes.append(np.mean(snum_nodes))
 		print pearsonr(mods,num_nodes)
 
-def check_normalize(subjects,task,atlas='power'):	
-	for subject in subjects:
-		print subject
-		s_matrix = []
-		files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
-		for f in files:
-			f = np.load(f)
-			np.fill_diagonal(f,0.0)
-			f[np.isnan(f)] = 0.0
-			f = np.arctanh(f)
-			s_matrix.append(f.copy())
-		s_matrix = np.nanmean(s_matrix,axis=0)
-		assert s_matrix.shape == (264,264)
-		for cost in np.array(range(5,16))*0.01:
-			temp_matrix = s_matrix.copy()
-			graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=True)
-			assert np.diff([cost,graph.density()])[0] < .005
+def check_mst(subjects,task,atlas='power'):
+	for task in tasks:
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_%s.npy' %('hcp',task,atlas,'fz'))
+		for subject in subjects:
+			print subject
+			s_matrix = []
+			files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
+			for f in files:
+				f = np.load(f)
+				np.fill_diagonal(f,0.0)
+				f[np.isnan(f)] = 0.0
+				f = np.arctanh(f)
+				s_matrix.append(f.copy())
+			s_matrix = np.nanmean(s_matrix,axis=0)
+			assert s_matrix.shape == (264,264)
+			for cost in np.array(range(5,16))*0.01:
+				temp_matrix = s_matrix.copy()
+				graph = brain_graphs.matrix_to_igraph(temp_matrix,cost,binary=False,check_tri=False,interpolation='midpoint',normalize=False,mst=True)
+				# assert np.diff([cost,graph.density()])[0] < .005
+				# assert graph.is_connected() == True
 
 def check_scrubbed_normalize(subjects,task,atlas='power'):	
 	for subject in subjects:
@@ -608,10 +715,12 @@ def graph_metrics(subjects,task,atlas,run_version,project='hcp',run=False,scrubb
 					if len(remove_array[remove_array==1])/float(len(remove_array)) > .75:
 						continue
 				f = np.load(f)
+				1/0
 				np.fill_diagonal(f,0.0)
 				f[np.isnan(f)] = 0.0
 				f = np.arctanh(f)
 				s_matrix.append(f.copy())
+
 			if len(s_matrix) == 0:
 				continue
 			s_matrix = np.nanmean(s_matrix,axis=0)
@@ -732,9 +841,6 @@ def pc_edge_q_figure(tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGU
 			else:
 				locality_df = locality_df.append({"Node Type":'Local Node','t':real_t,'Task':task.capitalize()},ignore_index=True)
 		locality_df.dropna(inplace=True)
-		# stat = tstatfunc(locality_df.t[(locality_df["Node Type"]=='Connector Hub')&(locality_df["Task"]==task.capitalize())],locality_df.t[(locality_df["Node Type"]=='Local Node')&(locality_df["Task"]==task.capitalize())])
-		# print stat
-		# stats.append(stat)
 		if driver == 'PC':
 			predict_nodes = np.where(mod_pc_corr>0.0)[0]
 			local_predict_nodes = np.where(mod_pc_corr<0.0)[0]
@@ -766,7 +872,7 @@ def pc_edge_q_figure(tasks = ['REST','WM','GAMBLING','RELATIONAL','MOTOR','LANGU
 	plot_corr_matrix(np.nanmean(q_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_mean_q_corr_matrix.pdf'%(homedir,run_version),reorder=False,colors=colors[swap_indices],line=True,draw_legend=True,rectangle=False)
 	plot_corr_matrix(np.nanmean(pc_corr_matrix,axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_mean_pc_corr_matrix.pdf'%(homedir,run_version),reorder=False,colors=colors[swap_indices],line=True,draw_legend=True,rectangle=False)
 	plot_corr_matrix(np.nanmean(m[predict_nodes,:,:],axis=0)[:,swap_indices][swap_indices],network_names[swap_indices].copy(),out_file='%s/dynamic_mod/figures/%s_%s_mean_mediation_matrix_withbar.pdf'%(homedir,driver,run_version),reorder=False,colors=colors[swap_indices],line=True,draw_legend=True,rectangle=False)	
-	1/0
+
 	f = sns.plt.figure(figsize=(18,6))
 	sns.set_style("white")
 	sns.set_style("ticks")
@@ -911,6 +1017,28 @@ def individual_differnce_networks(task,atlas='power',run_version='fz'):
 	plot_corr_matrix(matrix=diff_matrix[:,swap_indices][swap_indices],membership=network_names[swap_indices].copy(),out_file=None,reorder=False,colors=colors[swap_indices],line=True,draw_legend=True,rectangle=False)
 	for network in np.unique(network_names):
 		print network, np.mean(diff_matrix[network_names==network][:,network_names!=network])
+
+def make_mean_matrix():
+	atlas = 'power'
+	for task in ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST']:
+		print task
+		matrix = []
+		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_power_subs_fz.npy' %('hcp',task))
+		for subject in subjects:
+			files = glob.glob('%sdynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(homedir,atlas,subject,atlas,task))
+			for f in files:
+				f = np.load(f)
+				assert np.nanmax(f) <= 1.
+				np.fill_diagonal(f,0.0)
+				mmax = np.nanmax(abs(np.tril(f,-1) - np.triu(f,1).transpose()))
+				if mmax != 0.0: print subject
+				assert np.isclose(mmax,0)
+				f = np.arctanh(f)
+				matrix.append(f.copy())
+		matrix = np.nanmean(matrix,axis=0)
+		print np.min(np.max(matrix,axis=1))
+		assert (matrix == np.load('/home/despoB/mb3152/diverse_club/graphs/%s.npy'%(task))).all() == True
+		# np.save('/home/despoB/mb3152/diverse_club/graphs/%s.npy'%(task),matrix)
 
 def connectivity_across_tasks(atlas='power',project='hcp',tasks = ['WM','GAMBLING','RELATIONAL','MOTOR','LANGUAGE','SOCIAL','REST'],run_version='fz_wc',control_com=False,control_motion=False):
 	results_df = pd.DataFrame(columns=['Task','Analysis','Statistic', 'Result'])
@@ -1382,7 +1510,7 @@ def multi_med(data):
 	med_val = np.mean(Mediation(outcome_model, mediator_model, "pc", "weight").fit(n_rep=10).ACME_avg)
 	return med_val
 
-def mediation(task):
+def connector_mediation(task):
 	"""
 	264,264,264 matrix, which edges mediate the relationship between PC and Q
 	"""
@@ -1399,44 +1527,24 @@ def mediation(task):
 		mod_pc_corr[i] = nan_pearsonr(subject_mods,subject_pcs[:,i])[0]
 	mean_conn = np.nanmean(matrices,axis=0)
 	e_tresh = np.percentile(mean_conn,85)
-	try:
-		m = np.load('%s/dynamic_mod/results/full_med_matrix_new_%s.npy'%(homedir,task))
-	except:
-		subject_pcs[np.isnan(subject_pcs)] = 0.0
-		m = np.zeros((264,264,264))
-		pool = Pool(40)
-		for n in range(264):
-			print n
-			sys.stdout.flush()
-			variables =  []
-			for i,j in combinations(range(264),2):
-				variables.append(pd.DataFrame(data={'pc':subject_pcs[:,n],'weight':matrices[:,i,j],'q':subject_mods},index=range(len(subject_pcs))))
-			results = pool.map(multi_med,variables)
-			for r,i in zip(results,combinations(range(264),2)):
-				m[n,i[0],i[1]] = r
-				m[n,i[1],i[0]] = r
-			np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task),m)
-	locality_df = pd.DataFrame()
-	for i in range(264):
-		real_t = scipy.stats.ttest_ind(m[i][np.argwhere(mean_conn[i]>=e_tresh)][:,:,np.arange(264)!=i].reshape(-1),m[i][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1))[0]
-		if mod_pc_corr[i] > 0.0:
-			locality_df = locality_df.append({"Nodes' Correlation with Q":'+','t':real_t},ignore_index=True)
-		else:
-			locality_df = locality_df.append({"Nodes' Correlation with Q":'-','t':real_t},ignore_index=True)
-	locality_df.dropna(inplace=True)
-	stat = tstatfunc(locality_df.t[locality_df["Nodes' Correlation with Q"]=='+'],locality_df.t[locality_df["Nodes' Correlation with Q"]=='-'])
-	print stat
-	# sns.set_style("white")
-	# sns.set_style("ticks")
-	# sns.violinplot(data=locality_df,y='t',x="Nodes' Correlation with Q",order = ['+','-'],inner='quartile',palette=np.array(sns.color_palette("cubehelix", 10))[[7,9]])
-	# sns.plt.text(.5,50,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
-	# sns.plt.ylabel('T Test Values, mediation values of nieghbors versus mediation of non-neighbors')
-	# sns.plt.savefig('%s/dynamic_mod/figures/mediation_t_test_%s.pdf'%(homedir,task))
-	# sns.plt.show()
+	subject_pcs[np.isnan(subject_pcs)] = 0.0
+	m = np.zeros((264,264,264))
+	pool = Pool(40)
+	for n in range(264):
+		print n
+		sys.stdout.flush()
+		variables =  []
+		for i,j in combinations(range(264),2):
+			variables.append(pd.DataFrame(data={'pc':subject_pcs[:,n],'weight':matrices[:,i,j],'q':subject_mods},index=range(len(subject_pcs))))
+		results = pool.map(multi_med,variables)
+		for r,i in zip(results,combinations(range(264),2)):
+			m[n,i[0],i[1]] = r
+			m[n,i[1],i[0]] = r
+		np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s.npy'%(task),m)
 
 def local_mediation(task):
 	"""
-	264,264,264 matrix, which edges mediate the relationship between PC and Q
+	264,264,264 matrix, which edges mediate the relationship between WMD and Q
 	"""
 	atlas = 'power'
 	project='hcp'
@@ -1452,40 +1560,21 @@ def local_mediation(task):
 		mod_wmd_corr[i] = nan_pearsonr(subject_mods,subject_wmds[:,i])[0]
 	mean_conn = np.nanmean(matrices,axis=0)
 	e_tresh = np.percentile(mean_conn,85)
-	try:
-		m = np.load('%s/dynamic_mod/results/full_med_matrix_new_%s_wmds.npy'%(homedir,task))
-	except:
-		subject_wmds[np.isnan(subject_pcs)] = 0.0
-		m = np.zeros((264,264,264))
-		pool = Pool(40)
-		for n in range(264):
-			print n
-			sys.stdout.flush()
-			variables =  []
-			for i,j in combinations(range(264),2):
-				variables.append(pd.DataFrame(data={'pc':subject_wmds[:,n],'weight':matrices[:,i,j],'q':subject_mods},index=range(len(subject_pcs))))
-			results = pool.map(multi_med,variables)
-			for r,i in zip(results,combinations(range(264),2)):
-				m[n,i[0],i[1]] = r
-				m[n,i[1],i[0]] = r
-			np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s_wmds.npy'%(task),m)
-	locality_df = pd.DataFrame()
-	for i in range(264):
-		real_t = scipy.stats.ttest_ind(np.abs(m[i][np.argwhere(mean_conn[i]>e_tresh)][:,:,np.arange(264)!=i].reshape(-1)),np.abs(m[i][np.argwhere(mean_conn[i]<e_tresh)][:,:,np.arange(264)!=i].reshape(-1)))[0]
-		if mod_wmd_corr[i] > 0.0:
-			locality_df = locality_df.append({"Nodes' Correlation with Q":'+','t':real_t},ignore_index=True)
-		else:
-			locality_df = locality_df.append({"Nodes' Correlation with Q":'-','t':real_t},ignore_index=True)
-	locality_df.dropna(inplace=True)
-	stat = tstatfunc(locality_df.t[locality_df["Nodes' Correlation with Q"]=='+'],locality_df.t[locality_df["Nodes' Correlation with Q"]=='-'])
-	print stat
-	# sns.set_style("white")
-	# sns.set_style("ticks")
-	# sns.violinplot(data=locality_df,y='t',x="Nodes' Correlation with Q",order = ['+','-'],inner='quartile',palette=np.array(sns.color_palette("cubehelix", 10))[[7,9]])
-	# sns.plt.text(.5,50,stat,ha='center',color='black',fontsize=sns.plotting_context()['font.size'])
-	# sns.plt.ylabel('T Test Values, mediation values of nieghbors versus mediation of non-neighbors')
-	# sns.plt.savefig('%s/dynamic_mod/figures/mediation_t_test_%s.pdf'%(homedir,task))
-	# sns.plt.show()
+	subject_wmds[np.isnan(subject_pcs)] = 0.0
+	m = np.zeros((264,264,264))
+	pool = Pool(40)
+	for n in range(264):
+		print n
+		sys.stdout.flush()
+		variables = []
+		for i,j in combinations(range(264),2):
+			variables.append(pd.DataFrame(data={'pc':subject_wmds[:,n],'weight':matrices[:,i,j],'q':subject_mods},index=range(len(subject_pcs))))
+		results = pool.map(multi_med,variables)
+		for r,i in zip(results,combinations(range(264),2)):
+			m[n,i[0],i[1]] = r
+			m[n,i[1],i[0]] = r
+		np.save('/home/despoB/mb3152/dynamic_mod/results/full_med_matrix_new_%s_wmds.npy'%(task),m)
+
 
 def local_versus_connector_mediation(task):
 	task = 'WM'
@@ -1738,8 +1827,8 @@ def specificity():
 					if known_membership[n2] == 0:
 						continue
 					array = pc_edge_corr[n1][n2]
-					weight_change_matrix_between[n1,n2] = np.nansum(pc_edge_corr[n1][n2][np.where((known_membership!=known_membership[n2])&(range(264)!=n1))])
-					weight_change_matrix_within[n1,n2] = np.nansum(pc_edge_corr[n1][n2][np.where((known_membership==known_membership[n2])&(range(264)!=n1))])
+					weight_change_matrix_between[n1,n2] = np.nansum(pc_edge_corr[n1][n2][np.where((known_membership!=known_membership[n2])&(np.arange(264)!=n1))])
+					weight_change_matrix_within[n1,n2] = np.nansum(pc_edge_corr[n1][n2][np.where((known_membership==known_membership[n2])&(np.arange(264)!=n1))])
 					# for n3 in range(264):
 					# 	if n1 == n3:
 					# 		continue
@@ -1767,8 +1856,8 @@ def specificity():
 
 	# plot_connectivity_results(df[(df['Q+/Q-']=='Q+') &(df['Hub Measure']=='PC')],"Strength of r's, i's PC & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_pcqplus_%s.pdf'%(edge_thresh_val))
 	# plot_connectivity_results(df[(df['Q+/Q-']=='Q-') &(df['Hub Measure']=='PC')],"Strength of r's, i's PC & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_pcqminus_%s.pdf'%(edge_thresh_val))
-	plot_connectivity_results(df[(df['Q+/Q-']=='Q+') &(df['Hub Measure']=='WCD')],"Strength of r's, i's WCD & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_wmdqplus_%s.pdf'%(edge_thresh_val))
-	plot_connectivity_results(df[(df['Q+/Q-']=='Q-') &(df['Hub Measure']=='WCD')],"Strength of r's, i's WCD & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_wmdqminus_%s.pdf'%(edge_thresh_val))
+	# plot_connectivity_results(df[(df['Q+/Q-']=='Q+') &(df['Hub Measure']=='WCD')],"Strength of r's, i's WCD & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_wmdqplus_%s.pdf'%(edge_thresh_val))
+	# plot_connectivity_results(df[(df['Q+/Q-']=='Q-') &(df['Hub Measure']=='WCD')],"Strength of r's, i's WCD & j's Q",'Average Edge i-j Weight','/home/despoB/mb3152/dynamic_mod/figures/edge_spec_wmdqminus_%s.pdf'%(edge_thresh_val))
 	# """
 	# Are connector nodes modulating the edges that are most variable across subjects?
 	# """
@@ -2517,9 +2606,7 @@ def get_power_partition(atlas):
 
 def get_power_pc(hub='pc'):
     data = pd.read_csv('/home/despoB/mb3152/modularity/mmc3.csv')
-    # data= data.dropna()
     data['new'] = np.ones(len(data))
-    data2 = np.zeros(len(data))
     if hub == 'pc':
         for x2,y2,z2,pc in zip(data.X2,data.Y2,data.Z2,data.PC):
             data.new[data[data.X1==x2][data.Z1==z2][data.Y1==y2].index[0]] = pc
@@ -2541,21 +2628,23 @@ def get_power_pc_np(hub='pc'):
     PC = np.array(data.PC).copy()
     for x2,y2,z2,pc in zip(X2,Y2,Z2,PC):
         return_pc[data[data.X1==x2][data.Z1==z2][data.Y1==y2].index[0]] = pc
+    return return_pc
 
 def get_power_pc_new(hub='pc'):
     data = pd.read_csv('/home/despoB/mb3152/modularity/mmc3_new.csv')
-    data= data.dropna()
+    data.rename(columns={'\xef\xbb\xbfX1': 'X1'}, inplace=True)
+    data = data.dropna()
     data['new'] = np.zeros(len(data))
+    data['new'] = np.nan
     if hub == 'pc':
         for x2,y2,z2,pc in zip(data.X2,data.Y2,data.Z2,data.PC):
-            data.new[data[data.X1==x2][data.Z1==z2][data.Y1==y2].index[0]] = pc
+            data.new[data[(data.X1==x2)&(data.Z1==z2)&(data.Y1==y2)].index[0]] = pc
     else:
         for roi_num,x,y,z,ap in zip(data.index,data.X1,data.Y1,data.Z1,data.CD):
             fill_index = data.new[data.X2==x][data.Y2==y][data.Z2==z]
             data.new[fill_index.index.values[0]] = ap
-    values_dict = data.new.to_dict()
+    values_dict = data.new.values
     return values_dict
-
 
 def human_rich_club():
 	"""
@@ -2575,17 +2664,18 @@ def human_rich_club():
 		# subjects = np.array(hcp_subjects).copy()
 		# subjects = list(subjects)
 		# subjects = remove_missing_subjects(subjects,task,atlas)
-		subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
-		static_results = graph_metrics(subjects,task,atlas,run_version='fz')
-		subject_pcs = static_results['subject_pcs']
-		matrices = static_results['matrices']
+		# subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+		# static_results = graph_metrics(subjects,task,atlas,run_version='fz')
+		# subject_pcs = static_results['subject_pcs']
+		# matrices = static_results['matrices']
 		avg_pc_normalized_phis = []
 		avg_degree_normalized_phis = []
 		intersects = []
 		average_pc = []
 		average_deg = []
 		for cost in np.arange(5,21)*0.01:
-			temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
+			temp_matrix = np.load('/home/despoB/mb3152/diverse_club/graphs/%s.npy'%(task))
+			# temp_matrix = np.nanmean(static_results['matrices'],axis=0).copy()
 			graph = brain_graphs.matrix_to_igraph(temp_matrix.copy(),cost=cost,mst=True)
 			matrix = np.array(graph.get_adjacency(attribute='weight').data)
 			loops = np.array(graph.is_loop())
@@ -2862,8 +2952,6 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 	# run_version = 'fz'
 	# control_com=False
 	# control_motion=False
-	import warnings
-	warnings.filterwarnings('ignore')
 	# tasks=['WM','RELATIONAL','SOCIAL','LANGUAGE']
 	# project='hcp'
 	# atlas='power'
@@ -3011,7 +3099,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 		vs = []
 		for t in range(pvals.shape[0]):
 			vs.append([pvals.copy(),t,task_perf])
-		pool = Pool(5)
+		pool = Pool(2)
 		mean_nodal_prediction = pool.map(sm_predict,vs)
 		result = pearsonr(np.array(mean_nodal_prediction).reshape(-1),task_perf)
 		print 'Mean Nodal Prediction of Performance, LOO: ', result
@@ -3205,7 +3293,7 @@ def performance_across_tasks(atlas='power',tasks=['WM','RELATIONAL','LANGUAGE','
 	# plot_results(loo_df,'Rest Versus Task','Performance','/home/despoB/mb3152/dynamic_mod/figures/Rest_Versus_Task_Predicted_Performance.pdf')
 
 def c_elegans_rich_club(plt_mat=False):
-	worms = ['Worm1','Worm2','Worm3','Worm4']
+	
 	df = pd.DataFrame(columns=["Percent Overlap", 'Percent Community, PC','Percent Community, Degree','Worm'])
 	plt_mat = False
 	draw_graph = False
@@ -3213,8 +3301,10 @@ def c_elegans_rich_club(plt_mat=False):
 	import matlab.engine
 	eng = matlab.engine.start_matlab()
 	eng.addpath('/home/despoB/mb3152/brain_graphs/bct/')
+	worms = ['Worm1','Worm2','Worm3','Worm4']
 	for worm in worms:
 		matrix = np.array(pd.read_excel('pnas.1507110112.sd01.xls',sheetname=worm).corr())[4:,4:]
+		print np.isnan(matrix).any()
 		avg_pc_normalized_phis = []
 		avg_degree_normalized_phis = []
 		print matrix.shape
@@ -3604,30 +3694,46 @@ def airlines_RC(return_graph=False):
 # human_attacks()
 # fce_attacks()
 """
-SGE Inputs
-"""
-
-# atlas = 'power'
+# SGE Inputs
+# """
+1/0
+hcp_subject_dir = '/home/despoB/connectome-data/SUBJECT/*TASK*/*reg*'
+atlas = 'power'
 # tasks = ['WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','MOTOR','REST']
-# for task in tasks:
-# 	print task
-# 	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
-# 	for subject in subjects:
-# 		s_matrix = []
-# 		files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task))
-# 		# files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
-# 		if len(files) < 2:
-# 			print subject,task
-# 			1/0
-# 		for f in files:
-# 			f = np.load(f)
-# 			np.fill_diagonal(f,0.0)
-# 			f[np.isnan(f)] = 0.0
-# 			f = np.arctanh(f)
-# 			if np.isfinite(f).all() == False:
-# 				continue
-# 			s_matrix.append(f.copy())
-# 		s_matrix = np.nanmean(s_matrix,axis=0)
+tasks = ['WM','GAMBLING','RELATIONAL','LANGUAGE','SOCIAL','MOTOR']
+tasks = ['REST']
+for task in tasks:
+	print task
+	subjects = np.load('/home/despoB/mb3152/dynamic_mod/results/%s_%s_%s_subs_fz.npy' %('hcp',task,atlas))
+	for subject in subjects:
+		# subject_path = hcp_subject_dir.replace('SUBJECT',subject).replace('TASK',task)
+		# files = glob.glob(subject_path)
+
+
+		s_matrix = []
+		# files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix_scrubbed_0.2.npy'%(atlas,subject,atlas,task))
+		files = glob.glob('/home/despoB/mb3152/dynamic_mod/%s_matrices/%s_%s_*%s*_matrix.npy'%(atlas,subject,atlas,task))
+		if len(files) > 4:
+			print task, subject
+		# if len(files) < 2:
+			# print subject,task
+			# 1/0
+		for f in files:
+			f = np.load(f)
+
+			np.fill_diagonal(f,0.0)
+			f[np.isnan(f)] = 0.0
+			assert np.sum(abs(np.tril(f) - np.triu(f).transpose())) == 0.0
+			# np.sum(np.tril(f,-1) - np.triu(f,1).transpose()) == 0.0
+
+			# continue
+
+		# 	f = np.arctanh(f)
+		# 	if np.isfinite(f).all() == False:
+		# 		continue
+		# 	s_matrix.append(f.copy())
+		# s_matrix = np.nanmean(s_matrix,axis=0)
+		# assert np.sum(np.tril(t,-1) - np.triu(t,1).transpose()) == 0.0
 # 		assert s_matrix.shape == (264,264)
 # 		for cost in np.array(range(5,16))*0.01:
 # 			temp_matrix = s_matrix.copy()
