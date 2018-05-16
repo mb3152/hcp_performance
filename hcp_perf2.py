@@ -1,5 +1,5 @@
 #!/home/despoB/mb3152/anaconda2/bin/python
-# import brain_graphs
+import brain_graphs
 import pandas as pd
 import matlab
 import matlab.engine
@@ -20,7 +20,7 @@ import nibabel as nib
 from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.neural_network import MLPRegressor
 from itertools import combinations, permutations
-# from igraph import Graph, ADJ_UNDIRECTED, VertexClustering
+from igraph import Graph, ADJ_UNDIRECTED, VertexClustering
 import glob
 import math
 import matplotlib.patches as patches
